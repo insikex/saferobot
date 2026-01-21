@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-SafeRobot v5.0 - Telegram Bot
+SafeRobot v6.0 - Telegram Bot
 Multi-platform downloader & Sticker maker with WhatsApp support
 Enhanced features: YouTube, TikTok, Instagram, Pinterest, Facebook, X/Twitter
+Now with BUTTON-BASED MENU (no commands needed!)
 """
 
 import os
@@ -13,7 +14,7 @@ import json
 import zipfile
 import io
 from datetime import datetime, timedelta
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, LabeledPrice
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes, PreCheckoutQueryHandler, ConversationHandler
 import yt_dlp
 from urllib.parse import urlparse
@@ -314,7 +315,7 @@ class UserDatabase:
 db = UserDatabase(DATABASE_PATH)
 
 # ============================================
-# LANGUAGES - ENHANCED
+# LANGUAGES - ENHANCED FOR BUTTONS
 # ============================================
 LANGUAGES = {
     'id': {
@@ -331,11 +332,11 @@ Bot downloader & sticker maker serba bisa!
 📦 *Sticker Pack Official:*
 {SAFEROBOT_STICKER_PACK}
 
-Kirim link atau foto untuk mulai! 👇""",
-        'newpack_prompt': "📦 *Buat Sticker Pack Baru*\n\nKirim nama untuk pack sticker Anda:\n(contoh: My Cool Stickers)\n\nAtau /cancel untuk batal",
+Kirim link atau foto, atau gunakan tombol di bawah! 👇""",
+        'newpack_prompt': "📦 *Buat Sticker Pack Baru*\n\nKirim nama untuk pack sticker Anda:\n(contoh: My Cool Stickers)\n\nTekan tombol Batal untuk membatalkan.",
         'pack_created': "✅ Pack *'{}'* berhasil dibuat!\n\nSekarang kirim foto untuk menambah sticker.",
         'pack_saved': "💾 *Pack Tersimpan!*\n\n📦 Nama: {}\n🎨 Sticker: {} buah\n\n✅ Pack sudah tersimpan di favorites!",
-        'my_packs_empty': f"📦 Anda belum punya pack tersimpan.\n\nKetik /newpack untuk membuat pack baru!\n\n📦 *Sticker Pack Official:*\n{SAFEROBOT_STICKER_PACK}",
+        'my_packs_empty': f"📦 Anda belum punya pack tersimpan.\n\nTekan tombol 📦 Buat Pack Baru untuk memulai!\n\n📦 *Sticker Pack Official:*\n{SAFEROBOT_STICKER_PACK}",
         'my_packs_list': "📦 *Sticker Pack Anda*\n\nTotal: {} pack\n\n",
         'pack_deleted': "🗑️ Pack berhasil dihapus!",
         'save_pack_button': "💾 Simpan Pack",
@@ -366,7 +367,7 @@ Kirim nama custom untuk sticker pack Anda:
 
 Nama saat ini: {}
 
-Atau /cancel untuk batal""",
+Tekan tombol Batal untuk membatalkan.""",
         'custom_name_set': "✅ Nama sticker pack berhasil diubah ke: *{}*",
         'custom_name_free': f"❌ Fitur ini hanya untuk user Premium!\n\nNama default Anda: *{DEFAULT_STICKER_PACK_TITLE}*\n\n💡 Upgrade ke Premium untuk custom nama!",
         'about': f"""ℹ️ *Tentang SafeRobot*
@@ -405,7 +406,7 @@ Terima kasih! 🙏""",
         'video_caption': "🎥 *{}*\n\n🔥 by SafeRobot",
         'audio_caption': "🎵 *{}*\n\n🔥 by SafeRobot",
         'photo_caption': "📷 *{}*\n\n🔥 by SafeRobot",
-        'sticker_limit_reached': "⚠️ *Limit tercapai!*\n\nAnda sudah buat {} stiker.\n\n💡 Ketik /newpack untuk pack baru\n👑 Atau upgrade PREMIUM!",
+        'sticker_limit_reached': "⚠️ *Limit tercapai!*\n\nAnda sudah buat {} stiker.\n\n💡 Tekan tombol 📦 Buat Pack Baru\n👑 Atau upgrade PREMIUM!",
         'processing_sticker': "🎨 Memproses gambar...",
         'download_failed': "❌ Download gagal!\n\nError: {}\n\nCoba link lain.",
         'error_occurred': "❌ Error: {}",
@@ -415,17 +416,21 @@ Terima kasih! 🙏""",
         'menu_about': "ℹ️ Tentang",
         'menu_premium': "👑 Premium",
         'menu_start': "🏠 Menu Utama",
-        'menu_mystatus': "📊 Status",
+        'menu_mystatus': "📊 Status Saya",
+        'menu_newpack': "📦 Buat Pack Baru",
+        'menu_customname': "✏️ Custom Nama",
+        'menu_stats': "📈 Statistik",
         'send_link': "🔎 Kirim link atau foto!",
         'premium_active': "👑 *PREMIUM AKTIF*\n\n✅ Hingga: {}\n\n*Benefit:*\n• 250MB download\n• Unlimited stickers\n• Custom nama pack\n• WhatsApp export",
         'free_user': f"📊 *STATUS*\n\n🆓 FREE User\n📊 Download: {{}}\n🎨 Sticker: {{}}\n📦 Nama Pack: {DEFAULT_STICKER_PACK_TITLE}\n\n💡 Upgrade Premium untuk custom nama!",
-        'payment_success': "✅ *Pembayaran Berhasil!*\n\n👑 Anda Premium!\n⏰ Hingga: {}\n\nSelamat! 🎉\n\n💡 Gunakan /customname untuk custom nama sticker pack!",
+        'payment_success': "✅ *Pembayaran Berhasil!*\n\n👑 Anda Premium!\n⏰ Hingga: {}\n\nSelamat! 🎉\n\n💡 Tekan tombol ✏️ Custom Nama untuk mengubah nama sticker pack!",
         'unsupported': "❌ Platform tidak didukung!\n\n✅ Didukung: YouTube, TikTok, Instagram, Pinterest, Facebook, X/Twitter",
         'file_too_large': "⚠️ File terlalu besar ({:.1f}MB)!\n\n{}\n\n💡 {}",
         'file_too_large_free': "Limit free user: 50MB",
         'file_too_large_premium': "Limit premium: 250MB",
         'upgrade_hint': "Upgrade ke Premium untuk download hingga 250MB!",
-        'try_smaller': "Coba video yang lebih pendek."
+        'try_smaller': "Coba video yang lebih pendek.",
+        'back_button': "⬅️ Kembali"
     },
     'en': {
         'welcome': f"""🤖 *Welcome to SafeRobot!*
@@ -441,11 +446,11 @@ All-in-one downloader & sticker maker bot!
 📦 *Official Sticker Pack:*
 {SAFEROBOT_STICKER_PACK}
 
-Send link or photo to start! 👇""",
-        'newpack_prompt': "📦 *Create New Sticker Pack*\n\nSend name for your sticker pack:\n(example: My Cool Stickers)\n\nOr /cancel to cancel",
+Send link or photo, or use the buttons below! 👇""",
+        'newpack_prompt': "📦 *Create New Sticker Pack*\n\nSend name for your sticker pack:\n(example: My Cool Stickers)\n\nPress Cancel button to cancel.",
         'pack_created': "✅ Pack *'{}'* created successfully!\n\nNow send photos to add stickers.",
         'pack_saved': "💾 *Pack Saved!*\n\n📦 Name: {}\n🎨 Stickers: {} pcs\n\n✅ Pack saved to favorites!",
-        'my_packs_empty': f"📦 You don't have any saved packs yet.\n\nType /newpack to create a new pack!\n\n📦 *Official Sticker Pack:*\n{SAFEROBOT_STICKER_PACK}",
+        'my_packs_empty': f"📦 You don't have any saved packs yet.\n\nPress 📦 Create New Pack button to start!\n\n📦 *Official Sticker Pack:*\n{SAFEROBOT_STICKER_PACK}",
         'my_packs_list': "📦 *Your Sticker Packs*\n\nTotal: {} packs\n\n",
         'pack_deleted': "🗑️ Pack deleted successfully!",
         'save_pack_button': "💾 Save Pack",
@@ -476,7 +481,7 @@ Send a custom name for your sticker pack:
 
 Current name: {}
 
-Or /cancel to cancel""",
+Press Cancel button to cancel.""",
         'custom_name_set': "✅ Sticker pack name changed to: *{}*",
         'custom_name_free': f"❌ This feature is for Premium users only!\n\nYour default name: *{DEFAULT_STICKER_PACK_TITLE}*\n\n💡 Upgrade to Premium for custom name!",
         'about': f"""ℹ️ *About SafeRobot*
@@ -515,7 +520,7 @@ Thank you! 🙏""",
         'video_caption': "🎥 *{}*\n\n🔥 by SafeRobot",
         'audio_caption': "🎵 *{}*\n\n🔥 by SafeRobot",
         'photo_caption': "📷 *{}*\n\n🔥 by SafeRobot",
-        'sticker_limit_reached': "⚠️ *Limit reached!*\n\nYou've created {} stickers.\n\n💡 Type /newpack for new pack\n👑 Or upgrade PREMIUM!",
+        'sticker_limit_reached': "⚠️ *Limit reached!*\n\nYou've created {} stickers.\n\n💡 Press 📦 Create New Pack button\n👑 Or upgrade PREMIUM!",
         'processing_sticker': "🎨 Processing image...",
         'download_failed': "❌ Download failed!\n\nError: {}\n\nTry another link.",
         'error_occurred': "❌ Error: {}",
@@ -525,23 +530,30 @@ Thank you! 🙏""",
         'menu_about': "ℹ️ About",
         'menu_premium': "👑 Premium",
         'menu_start': "🏠 Main Menu",
-        'menu_mystatus': "📊 Status",
+        'menu_mystatus': "📊 My Status",
+        'menu_newpack': "📦 Create New Pack",
+        'menu_customname': "✏️ Custom Name",
+        'menu_stats': "📈 Statistics",
         'send_link': "🔎 Send link or photo!",
         'premium_active': "👑 *PREMIUM ACTIVE*\n\n✅ Until: {}\n\n*Benefits:*\n• 250MB download\n• Unlimited stickers\n• Custom pack name\n• WhatsApp export",
         'free_user': f"📊 *STATUS*\n\n🆓 FREE User\n📊 Downloads: {{}}\n🎨 Stickers: {{}}\n📦 Pack Name: {DEFAULT_STICKER_PACK_TITLE}\n\n💡 Upgrade Premium for custom name!",
-        'payment_success': "✅ *Payment Successful!*\n\n👑 You're Premium!\n⏰ Until: {}\n\nEnjoy! 🎉\n\n💡 Use /customname to customize your sticker pack name!",
+        'payment_success': "✅ *Payment Successful!*\n\n👑 You're Premium!\n⏰ Until: {}\n\nEnjoy! 🎉\n\n💡 Press ✏️ Custom Name button to customize your sticker pack name!",
         'unsupported': "❌ Platform not supported!\n\n✅ Supported: YouTube, TikTok, Instagram, Pinterest, Facebook, X/Twitter",
         'file_too_large': "⚠️ File too large ({:.1f}MB)!\n\n{}\n\n💡 {}",
         'file_too_large_free': "Free user limit: 50MB",
         'file_too_large_premium': "Premium limit: 250MB",
         'upgrade_hint': "Upgrade to Premium for downloads up to 250MB!",
-        'try_smaller': "Try a shorter video."
+        'try_smaller': "Try a shorter video.",
+        'back_button': "⬅️ Back"
     }
 }
 
 def get_user_language(update: Update) -> str:
     try:
-        user_lang = update.effective_user.language_code
+        if update.callback_query:
+            user_lang = update.callback_query.from_user.language_code
+        else:
+            user_lang = update.effective_user.language_code
         if user_lang and user_lang.lower().startswith('id'):
             return 'id'
         return 'en'
@@ -552,13 +564,39 @@ def get_text(update: Update, key: str) -> str:
     lang = get_user_language(update)
     return LANGUAGES[lang].get(key, LANGUAGES['en'].get(key, ''))
 
-def get_main_keyboard(update: Update):
-    lang = get_user_language(update)
+def get_main_menu_keyboard(lang: str, is_owner: bool = False):
+    """Create main menu with inline buttons"""
     keyboard = [
-        [KeyboardButton(LANGUAGES[lang]['menu_about']), KeyboardButton(LANGUAGES[lang]['menu_premium'])],
-        [KeyboardButton(LANGUAGES[lang]['menu_mystatus']), KeyboardButton(LANGUAGES[lang]['menu_mypacks'])]
+        [
+            InlineKeyboardButton(LANGUAGES[lang]['menu_newpack'], callback_data="menu_newpack"),
+            InlineKeyboardButton(LANGUAGES[lang]['menu_mypacks'], callback_data="menu_mypacks")
+        ],
+        [
+            InlineKeyboardButton(LANGUAGES[lang]['menu_mystatus'], callback_data="menu_mystatus"),
+            InlineKeyboardButton(LANGUAGES[lang]['menu_premium'], callback_data="menu_premium")
+        ],
+        [
+            InlineKeyboardButton(LANGUAGES[lang]['menu_customname'], callback_data="menu_customname"),
+            InlineKeyboardButton(LANGUAGES[lang]['menu_about'], callback_data="menu_about")
+        ],
+        [
+            InlineKeyboardButton("📦 Official Pack", url=SAFEROBOT_STICKER_PACK)
+        ]
     ]
-    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    
+    # Add stats button for owner
+    if is_owner:
+        keyboard.insert(0, [
+            InlineKeyboardButton(LANGUAGES[lang]['menu_stats'], callback_data="menu_stats")
+        ])
+    
+    return InlineKeyboardMarkup(keyboard)
+
+def get_back_to_menu_keyboard(lang: str):
+    """Create back to main menu button"""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(LANGUAGES[lang]['back_button'], callback_data="menu_main")]
+    ])
 
 def is_owner(user_id: int) -> bool:
     return user_id == OWNER_ID
@@ -771,152 +809,121 @@ bot = SafeRobot()
 # HANDLERS
 # ============================================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handler untuk /start - Shows main menu with buttons"""
     user = update.effective_user
     db.add_or_update_user(user.id, user.username, user.first_name, user.language_code)
     
-    welcome_msg = get_text(update, 'welcome')
-    keyboard = get_main_keyboard(update)
+    lang = get_user_language(update)
+    welcome_msg = LANGUAGES[lang]['welcome']
+    keyboard = get_main_menu_keyboard(lang, is_owner(user.id))
+    
     await update.message.reply_text(welcome_msg, parse_mode='Markdown', reply_markup=keyboard)
 
-# Handler untuk /newpack dengan conversation
-async def newpack_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start new pack creation process"""
+async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show main menu via callback query"""
+    query = update.callback_query
+    await query.answer()
+    
+    user = query.from_user
+    db.add_or_update_user(user.id, user.username, user.first_name, user.language_code)
+    
     lang = get_user_language(update)
+    welcome_msg = LANGUAGES[lang]['welcome']
+    keyboard = get_main_menu_keyboard(lang, is_owner(user.id))
     
-    keyboard = [[InlineKeyboardButton(LANGUAGES[lang]['cancel_button'], callback_data="cancel_newpack")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await update.message.reply_text(
-        LANGUAGES[lang]['newpack_prompt'],
-        parse_mode='Markdown',
-        reply_markup=reply_markup
-    )
-    return WAITING_PACK_NAME
+    await query.edit_message_text(welcome_msg, parse_mode='Markdown', reply_markup=keyboard)
 
-async def receive_pack_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Receive pack name from user"""
-    user_id = update.effective_user.id
-    pack_name = update.message.text.strip()
+async def show_about(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show about info via button"""
+    query = update.callback_query
+    await query.answer()
+    
+    lang = get_user_language(update)
+    about_msg = LANGUAGES[lang]['about']
+    
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📦 Official Pack", url=SAFEROBOT_STICKER_PACK)],
+        [InlineKeyboardButton(LANGUAGES[lang]['back_button'], callback_data="menu_main")]
+    ])
+    
+    await query.edit_message_text(about_msg, parse_mode='Markdown', reply_markup=keyboard)
+
+async def show_premium(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show premium info via button"""
+    query = update.callback_query
+    await query.answer()
+    
     lang = get_user_language(update)
     
-    # Validate pack name
-    if len(pack_name) > 50:
-        await update.message.reply_text("❌ Nama pack terlalu panjang! Maksimal 50 karakter." if lang == 'id' else "❌ Pack name too long! Max 50 characters.")
-        return WAITING_PACK_NAME
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton(
+            "💎 Upgrade ke Premium (200 ⭐)" if lang == 'id' else "💎 Upgrade to Premium (200 ⭐)",
+            callback_data="buy_premium"
+        )],
+        [InlineKeyboardButton(LANGUAGES[lang]['back_button'], callback_data="menu_main")]
+    ])
     
-    if len(pack_name) < 3:
-        await update.message.reply_text("❌ Nama pack terlalu pendek! Minimal 3 karakter." if lang == 'id' else "❌ Pack name too short! Min 3 characters.")
-        return WAITING_PACK_NAME
+    await query.edit_message_text(
+        LANGUAGES[lang]['premium_info'],
+        parse_mode='Markdown',
+        reply_markup=keyboard
+    )
+
+async def show_mystatus(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show user status via button"""
+    query = update.callback_query
+    await query.answer()
     
-    # Reset counter and set pack name
-    db.reset_sticker_pack_count(user_id)
-    db.set_current_pack_name(user_id, pack_name)
+    user_id = query.from_user.id
+    user_data = db.get_user(user_id)
+    lang = get_user_language(update)
     
-    # Get the title based on premium status
-    is_premium = db.is_premium(user_id)
-    if is_premium:
+    if not user_data:
+        await query.answer("❌ User not found!", show_alert=True)
+        return
+    
+    if db.is_premium(user_id):
+        premium_until = datetime.fromisoformat(user_data['premium_until'])
         custom_name = db.get_custom_sticker_name(user_id)
-        title_info = f"\n\n📛 Judul Pack: *{custom_name}*" if lang == 'id' else f"\n\n📛 Pack Title: *{custom_name}*"
-    else:
-        title_info = f"\n\n📛 Judul Pack: *{DEFAULT_STICKER_PACK_TITLE}*" if lang == 'id' else f"\n\n📛 Pack Title: *{DEFAULT_STICKER_PACK_TITLE}*"
-    
-    msg = LANGUAGES[lang]['pack_created'].format(pack_name) + title_info
-    msg += f"\n\n💡 Kirim foto untuk membuat sticker pertama!" if lang == 'id' else "\n\n💡 Send a photo to create your first sticker!"
-    
-    await update.message.reply_text(
-        msg,
-        parse_mode='Markdown'
-    )
-    
-    return ConversationHandler.END
-
-async def cancel_newpack(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Cancel pack creation"""
-    query = update.callback_query
-    await query.answer()
-    
-    lang = get_user_language(update)
-    await query.edit_message_text(LANGUAGES[lang]['pack_name_cancelled'])
-    
-    return ConversationHandler.END
-
-# Handler untuk /customname (premium only)
-async def customname_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start custom name setting process (premium only)"""
-    user_id = update.effective_user.id
-    lang = get_user_language(update)
-    
-    if not db.is_premium(user_id):
-        await update.message.reply_text(
-            LANGUAGES[lang]['custom_name_free'],
-            parse_mode='Markdown'
+        msg = LANGUAGES[lang]['premium_active'].format(
+            premium_until.strftime('%Y-%m-%d %H:%M')
         )
-        return ConversationHandler.END
+        msg += f"\n\n📛 Nama Pack: *{custom_name}*"
+    else:
+        msg = LANGUAGES[lang]['free_user'].format(
+            user_data['download_count'],
+            user_data['sticker_count']
+        )
     
-    current_name = db.get_custom_sticker_name(user_id)
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📦 Official Pack", url=SAFEROBOT_STICKER_PACK)],
+        [InlineKeyboardButton(LANGUAGES[lang]['back_button'], callback_data="menu_main")]
+    ])
     
-    keyboard = [[InlineKeyboardButton(LANGUAGES[lang]['cancel_button'], callback_data="cancel_customname")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await update.message.reply_text(
-        LANGUAGES[lang]['custom_name_prompt'].format(current_name),
-        parse_mode='Markdown',
-        reply_markup=reply_markup
-    )
-    return WAITING_CUSTOM_NAME
+    await query.edit_message_text(msg, parse_mode='Markdown', reply_markup=keyboard)
 
-async def receive_custom_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Receive custom name from user"""
-    user_id = update.effective_user.id
-    custom_name = update.message.text.strip()
-    lang = get_user_language(update)
-    
-    # Validate custom name
-    if len(custom_name) > 50:
-        await update.message.reply_text("❌ Nama terlalu panjang! Maksimal 50 karakter." if lang == 'id' else "❌ Name too long! Max 50 characters.")
-        return WAITING_CUSTOM_NAME
-    
-    if len(custom_name) < 3:
-        await update.message.reply_text("❌ Nama terlalu pendek! Minimal 3 karakter." if lang == 'id' else "❌ Name too short! Min 3 characters.")
-        return WAITING_CUSTOM_NAME
-    
-    # Set custom name
-    db.set_custom_sticker_name(user_id, custom_name)
-    
-    await update.message.reply_text(
-        LANGUAGES[lang]['custom_name_set'].format(custom_name),
-        parse_mode='Markdown'
-    )
-    
-    return ConversationHandler.END
-
-async def cancel_customname(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Cancel custom name setting"""
+async def show_mypacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show all saved sticker packs via button"""
     query = update.callback_query
     await query.answer()
     
-    lang = get_user_language(update)
-    await query.edit_message_text("❌ Dibatalkan." if lang == 'id' else "❌ Cancelled.")
-    
-    return ConversationHandler.END
-
-# Handler untuk /mypacks
-async def mypacks_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show all saved sticker packs"""
-    user_id = update.effective_user.id
+    user_id = query.from_user.id
     lang = get_user_language(update)
     
     try:
         packs = db.get_sticker_packs(user_id)
         
         if not packs or len(packs) == 0:
-            keyboard = [[InlineKeyboardButton(f"📦 Official Pack", url=SAFEROBOT_STICKER_PACK)]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton(LANGUAGES[lang]['menu_newpack'], callback_data="menu_newpack")],
+                [InlineKeyboardButton("📦 Official Pack", url=SAFEROBOT_STICKER_PACK)],
+                [InlineKeyboardButton(LANGUAGES[lang]['back_button'], callback_data="menu_main")]
+            ])
             
-            await update.message.reply_text(
+            await query.edit_message_text(
                 LANGUAGES[lang]['my_packs_empty'],
                 parse_mode='Markdown',
-                reply_markup=reply_markup
+                reply_markup=keyboard
             )
             return
         
@@ -951,77 +958,113 @@ async def mypacks_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             keyboard.append(row)
         
+        # Add create new pack button
+        keyboard.append([InlineKeyboardButton(LANGUAGES[lang]['menu_newpack'], callback_data="menu_newpack")])
         # Add official pack button
-        keyboard.append([InlineKeyboardButton(f"📦 Official SafeRobot Pack", url=SAFEROBOT_STICKER_PACK)])
+        keyboard.append([InlineKeyboardButton("📦 Official SafeRobot Pack", url=SAFEROBOT_STICKER_PACK)])
+        # Back button
+        keyboard.append([InlineKeyboardButton(LANGUAGES[lang]['back_button'], callback_data="menu_main")])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        await update.message.reply_text(
+        await query.edit_message_text(
             msg,
             parse_mode='Markdown',
             reply_markup=reply_markup
         )
     except Exception as e:
-        print(f"Error in mypacks_command: {e}")
+        print(f"Error in show_mypacks: {e}")
         import traceback
         traceback.print_exc()
-        await update.message.reply_text(
-            f"❌ Error: {str(e)}\n\nCoba lagi dengan /newpack untuk membuat pack baru."
-        )
+        await query.answer(f"❌ Error: {str(e)}", show_alert=True)
 
-async def mystatus_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show user status"""
-    user_id = update.effective_user.id
-    user_data = db.get_user(user_id)
+async def start_newpack(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Start new pack creation process via button"""
+    query = update.callback_query
+    await query.answer()
+    
     lang = get_user_language(update)
     
-    if not user_data:
-        await update.message.reply_text("❌ User not found!")
-        return
+    # Set state to waiting for pack name
+    context.user_data['waiting_for'] = 'pack_name'
     
-    if db.is_premium(user_id):
-        premium_until = datetime.fromisoformat(user_data['premium_until'])
-        custom_name = db.get_custom_sticker_name(user_id)
-        msg = LANGUAGES[lang]['premium_active'].format(
-            premium_until.strftime('%Y-%m-%d %H:%M')
-        )
-        msg += f"\n\n📛 Nama Pack: *{custom_name}*"
-    else:
-        msg = LANGUAGES[lang]['free_user'].format(
-            user_data['download_count'],
-            user_data['sticker_count']
-        )
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton(LANGUAGES[lang]['cancel_button'], callback_data="cancel_newpack")]
+    ])
     
-    keyboard = [[InlineKeyboardButton(f"📦 Official Pack", url=SAFEROBOT_STICKER_PACK)]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await update.message.reply_text(msg, parse_mode='Markdown', reply_markup=reply_markup)
-
-async def premium_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show premium info and payment button"""
-    lang = get_user_language(update)
-    
-    keyboard = [[
-        InlineKeyboardButton(
-            "💎 Upgrade ke Premium (200 ⭐)" if lang == 'id' else "💎 Upgrade to Premium (200 ⭐)",
-            callback_data="buy_premium"
-        )
-    ]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await update.message.reply_text(
-        LANGUAGES[lang]['premium_info'],
+    await query.edit_message_text(
+        LANGUAGES[lang]['newpack_prompt'],
         parse_mode='Markdown',
-        reply_markup=reply_markup
+        reply_markup=keyboard
     )
 
-async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handler untuk command /stats - Owner only"""
-    user_id = update.effective_user.id
+async def start_customname(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Start custom name setting process (premium only) via button"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    lang = get_user_language(update)
+    
+    if not db.is_premium(user_id):
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton(
+                "💎 Upgrade ke Premium" if lang == 'id' else "💎 Upgrade to Premium",
+                callback_data="menu_premium"
+            )],
+            [InlineKeyboardButton(LANGUAGES[lang]['back_button'], callback_data="menu_main")]
+        ])
+        
+        await query.edit_message_text(
+            LANGUAGES[lang]['custom_name_free'],
+            parse_mode='Markdown',
+            reply_markup=keyboard
+        )
+        return
+    
+    current_name = db.get_custom_sticker_name(user_id)
+    
+    # Set state to waiting for custom name
+    context.user_data['waiting_for'] = 'custom_name'
+    
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton(LANGUAGES[lang]['cancel_button'], callback_data="cancel_customname")]
+    ])
+    
+    await query.edit_message_text(
+        LANGUAGES[lang]['custom_name_prompt'].format(current_name),
+        parse_mode='Markdown',
+        reply_markup=keyboard
+    )
+
+async def cancel_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Cancel any pending input"""
+    query = update.callback_query
+    await query.answer()
+    
+    # Clear waiting state
+    context.user_data.pop('waiting_for', None)
+    
+    lang = get_user_language(update)
+    
+    # Show main menu
+    keyboard = get_main_menu_keyboard(lang, is_owner(query.from_user.id))
+    await query.edit_message_text(
+        LANGUAGES[lang]['pack_name_cancelled'] + "\n\n" + LANGUAGES[lang]['welcome'],
+        parse_mode='Markdown',
+        reply_markup=keyboard
+    )
+
+async def show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handler untuk stats - Owner only via button"""
+    query = update.callback_query
+    user_id = query.from_user.id
     
     if not is_owner(user_id):
-        await update.message.reply_text("❌ Perintah ini hanya untuk owner bot!")
+        await query.answer("❌ Hanya owner!", show_alert=True)
         return
+    
+    await query.answer()
     
     stats = db.get_stats()
     top_users = db.get_top_users(5)
@@ -1056,59 +1099,53 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     stats_msg += "\n━━━━━━━━━━━━━━━━━━━━"
     
-    keyboard = [[InlineKeyboardButton("🔄 Refresh", callback_data="refresh_stats")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    lang = get_user_language(update)
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔄 Refresh", callback_data="refresh_stats")],
+        [InlineKeyboardButton("📢 Broadcast", callback_data="start_broadcast")],
+        [InlineKeyboardButton(LANGUAGES[lang]['back_button'], callback_data="menu_main")]
+    ])
     
-    await update.message.reply_text(
+    await query.edit_message_text(
         stats_msg,
         parse_mode='Markdown',
-        reply_markup=reply_markup
+        reply_markup=keyboard
     )
 
-async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handler untuk command /broadcast - Owner only"""
-    user_id = update.effective_user.id
+async def start_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Start broadcast message input"""
+    query = update.callback_query
+    user_id = query.from_user.id
     
     if not is_owner(user_id):
-        await update.message.reply_text("❌ Perintah ini hanya untuk owner bot!")
+        await query.answer("❌ Hanya owner!", show_alert=True)
         return
     
-    if not context.args:
-        await update.message.reply_text(
-            "📢 *Format Broadcast*\n\n"
-            "Gunakan: `/broadcast <pesan>`\n\n"
-            "Contoh: `/broadcast Halo semua!`",
-            parse_mode='Markdown'
-        )
-        return
+    await query.answer()
     
-    message = ' '.join(context.args)
-    users = db.data['users']
+    # Set state to waiting for broadcast message
+    context.user_data['waiting_for'] = 'broadcast'
     
-    success = 0
-    failed = 0
+    lang = get_user_language(update)
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton(LANGUAGES[lang]['cancel_button'], callback_data="cancel_broadcast")]
+    ])
     
-    status_msg = await update.message.reply_text(
-        f"📡 Mengirim broadcast ke {len(users)} users..."
+    await query.edit_message_text(
+        "📢 *Broadcast Message*\n\nKirim pesan yang ingin di-broadcast ke semua user:\n\n_Tekan Batal untuk membatalkan_",
+        parse_mode='Markdown',
+        reply_markup=keyboard
     )
+
+async def cancel_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Cancel broadcast"""
+    query = update.callback_query
+    await query.answer()
     
-    for user_id_str in users.keys():
-        try:
-            await context.bot.send_message(
-                chat_id=int(user_id_str),
-                text=f"📢 *BROADCAST MESSAGE*\n\n{message}",
-                parse_mode='Markdown'
-            )
-            success += 1
-            await asyncio.sleep(0.05)
-        except Exception as e:
-            failed += 1
+    context.user_data.pop('waiting_for', None)
     
-    await status_msg.edit_text(
-        f"✅ Broadcast selesai!\n\n"
-        f"✅ Berhasil: {success}\n"
-        f"❌ Gagal: {failed}"
-    )
+    # Return to stats
+    await show_stats(update, context)
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler untuk foto - membuat sticker dan tambahkan ke sticker set Telegram"""
@@ -1119,13 +1156,18 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db.add_or_update_user(user.id, user.username, user.first_name, user.language_code)
     
     user_data = db.get_user(user_id)
-    is_premium = db.is_premium(user_id)
+    is_premium_user = db.is_premium(user_id)
     
-    if not is_premium:
+    if not is_premium_user:
         if user_data['current_sticker_pack_count'] >= FREE_STICKER_LIMIT:
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton(LANGUAGES[lang]['menu_newpack'], callback_data="menu_newpack")],
+                [InlineKeyboardButton(LANGUAGES[lang]['menu_premium'], callback_data="menu_premium")]
+            ])
             await update.message.reply_text(
                 LANGUAGES[lang]['sticker_limit_reached'].format(FREE_STICKER_LIMIT),
-                parse_mode='Markdown'
+                parse_mode='Markdown',
+                reply_markup=keyboard
             )
             return
     
@@ -1156,7 +1198,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pack_name = db.get_current_pack_name(user_id)
             
             # Get sticker pack title based on premium status
-            if is_premium:
+            if is_premium_user:
                 pack_title = db.get_custom_sticker_name(user_id)
             else:
                 pack_title = DEFAULT_STICKER_PACK_TITLE
@@ -1237,7 +1279,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_data = db.get_user(user_id)
             current_count = user_data['current_sticker_pack_count']
             
-            remaining = "Unlimited ♾️" if is_premium else f"{FREE_STICKER_LIMIT - current_count}"
+            remaining = "Unlimited ♾️" if is_premium_user else f"{FREE_STICKER_LIMIT - current_count}"
             
             info_text = (
                 f"📦 Pack: {pack_name}\n"
@@ -1274,6 +1316,12 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         callback_data=f"savepack_{user_id}_{current_count}"
                     )
                 ])
+            
+            # Menu buttons
+            keyboard.append([
+                InlineKeyboardButton(LANGUAGES[lang]['menu_newpack'], callback_data="menu_newpack"),
+                InlineKeyboardButton(LANGUAGES[lang]['menu_mypacks'], callback_data="menu_mypacks")
+            ])
             
             # Official pack link
             keyboard.append([
@@ -1320,28 +1368,129 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     db.add_or_update_user(user.id, user.username, user.first_name, user.language_code)
     
-    # Handle menu buttons
-    if text in [LANGUAGES['id']['menu_about'], LANGUAGES['en']['menu_about']]:
-        about_msg = get_text(update, 'about')
-        keyboard = [[InlineKeyboardButton(f"📦 Official Pack", url=SAFEROBOT_STICKER_PACK)]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text(about_msg, parse_mode='Markdown', reply_markup=reply_markup)
+    # Check if waiting for input
+    waiting_for = context.user_data.get('waiting_for')
+    
+    if waiting_for == 'pack_name':
+        # Process pack name input
+        pack_name = text
+        
+        if len(pack_name) > 50:
+            await update.message.reply_text(
+                "❌ Nama pack terlalu panjang! Maksimal 50 karakter." if lang == 'id' else "❌ Pack name too long! Max 50 characters."
+            )
+            return
+        
+        if len(pack_name) < 3:
+            await update.message.reply_text(
+                "❌ Nama pack terlalu pendek! Minimal 3 karakter." if lang == 'id' else "❌ Pack name too short! Min 3 characters."
+            )
+            return
+        
+        # Clear waiting state
+        context.user_data.pop('waiting_for', None)
+        
+        # Reset counter and set pack name
+        db.reset_sticker_pack_count(user.id)
+        db.set_current_pack_name(user.id, pack_name)
+        
+        # Get the title based on premium status
+        is_premium_user = db.is_premium(user.id)
+        if is_premium_user:
+            custom_name = db.get_custom_sticker_name(user.id)
+            title_info = f"\n\n📛 Judul Pack: *{custom_name}*" if lang == 'id' else f"\n\n📛 Pack Title: *{custom_name}*"
+        else:
+            title_info = f"\n\n📛 Judul Pack: *{DEFAULT_STICKER_PACK_TITLE}*" if lang == 'id' else f"\n\n📛 Pack Title: *{DEFAULT_STICKER_PACK_TITLE}*"
+        
+        msg = LANGUAGES[lang]['pack_created'].format(pack_name) + title_info
+        msg += f"\n\n💡 Kirim foto untuk membuat sticker pertama!" if lang == 'id' else "\n\n💡 Send a photo to create your first sticker!"
+        
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton(LANGUAGES[lang]['back_button'], callback_data="menu_main")]
+        ])
+        
+        await update.message.reply_text(msg, parse_mode='Markdown', reply_markup=keyboard)
         return
     
-    elif text in [LANGUAGES['id']['menu_premium'], LANGUAGES['en']['menu_premium']]:
-        await premium_command(update, context)
+    elif waiting_for == 'custom_name':
+        # Process custom name input
+        custom_name = text
+        
+        if not db.is_premium(user.id):
+            context.user_data.pop('waiting_for', None)
+            await update.message.reply_text(LANGUAGES[lang]['custom_name_free'], parse_mode='Markdown')
+            return
+        
+        if len(custom_name) > 50:
+            await update.message.reply_text(
+                "❌ Nama terlalu panjang! Maksimal 50 karakter." if lang == 'id' else "❌ Name too long! Max 50 characters."
+            )
+            return
+        
+        if len(custom_name) < 3:
+            await update.message.reply_text(
+                "❌ Nama terlalu pendek! Minimal 3 karakter." if lang == 'id' else "❌ Name too short! Min 3 characters."
+            )
+            return
+        
+        # Clear waiting state
+        context.user_data.pop('waiting_for', None)
+        
+        # Set custom name
+        db.set_custom_sticker_name(user.id, custom_name)
+        
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton(LANGUAGES[lang]['back_button'], callback_data="menu_main")]
+        ])
+        
+        await update.message.reply_text(
+            LANGUAGES[lang]['custom_name_set'].format(custom_name),
+            parse_mode='Markdown',
+            reply_markup=keyboard
+        )
         return
     
-    elif text in [LANGUAGES['id']['menu_mystatus'], LANGUAGES['en']['menu_mystatus']]:
-        await mystatus_command(update, context)
-        return
-    
-    elif text in [LANGUAGES['id']['menu_mypacks'], LANGUAGES['en']['menu_mypacks']]:
-        await mypacks_command(update, context)
-        return
-    
-    elif text in [LANGUAGES['id']['menu_start'], LANGUAGES['en']['menu_start']]:
-        await start(update, context)
+    elif waiting_for == 'broadcast':
+        # Process broadcast message (owner only)
+        if not is_owner(user.id):
+            context.user_data.pop('waiting_for', None)
+            return
+        
+        # Clear waiting state
+        context.user_data.pop('waiting_for', None)
+        
+        message = text
+        users = db.data['users']
+        
+        success = 0
+        failed = 0
+        
+        status_msg = await update.message.reply_text(
+            f"📡 Mengirim broadcast ke {len(users)} users..."
+        )
+        
+        for user_id_str in users.keys():
+            try:
+                await context.bot.send_message(
+                    chat_id=int(user_id_str),
+                    text=f"📢 *BROADCAST MESSAGE*\n\n{message}",
+                    parse_mode='Markdown'
+                )
+                success += 1
+                await asyncio.sleep(0.05)
+            except Exception as e:
+                failed += 1
+        
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton(LANGUAGES[lang]['back_button'], callback_data="menu_main")]
+        ])
+        
+        await status_msg.edit_text(
+            f"✅ Broadcast selesai!\n\n"
+            f"✅ Berhasil: {success}\n"
+            f"❌ Gagal: {failed}",
+            reply_markup=keyboard
+        )
         return
     
     # Check if it's a URL
@@ -1350,9 +1499,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     
     if not url_pattern.match(text):
+        # Not a URL, show main menu
+        keyboard = get_main_menu_keyboard(lang, is_owner(user.id))
         await update.message.reply_text(
             get_text(update, 'send_link'),
-            reply_markup=get_main_keyboard(update)
+            reply_markup=keyboard
         )
         return
     
@@ -1360,9 +1511,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     platform = bot.detect_platform(url)
     
     if not platform:
+        keyboard = get_main_menu_keyboard(lang, is_owner(user.id))
         await update.message.reply_text(
             get_text(update, 'unsupported'),
-            reply_markup=get_main_keyboard(update)
+            reply_markup=keyboard
         )
         return
     
@@ -1381,7 +1533,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     LANGUAGES[lang]['photo_button'], 
                     callback_data=f"p|{url_id}|{lang}"
                 )
-            ]
+            ],
+            [InlineKeyboardButton(LANGUAGES[lang]['back_button'], callback_data="menu_main")]
         ]
     else:
         keyboard = [
@@ -1405,6 +1558,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     callback_data=f"p|{url_id}|{lang}"
                 )
             ])
+        
+        keyboard.append([InlineKeyboardButton(LANGUAGES[lang]['back_button'], callback_data="menu_main")])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -1418,21 +1573,58 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler untuk button callback"""
     query = update.callback_query
+    data = query.data
+    
+    # Handle menu buttons
+    if data == "menu_main":
+        await show_main_menu(update, context)
+        return
+    elif data == "menu_about":
+        await show_about(update, context)
+        return
+    elif data == "menu_premium":
+        await show_premium(update, context)
+        return
+    elif data == "menu_mystatus":
+        await show_mystatus(update, context)
+        return
+    elif data == "menu_mypacks":
+        await show_mypacks(update, context)
+        return
+    elif data == "menu_newpack":
+        await start_newpack(update, context)
+        return
+    elif data == "menu_customname":
+        await start_customname(update, context)
+        return
+    elif data == "menu_stats":
+        await show_stats(update, context)
+        return
+    elif data == "cancel_newpack" or data == "cancel_customname":
+        await cancel_input(update, context)
+        return
+    elif data == "start_broadcast":
+        await start_broadcast(update, context)
+        return
+    elif data == "cancel_broadcast":
+        await cancel_broadcast(update, context)
+        return
+    
     await query.answer()
     
     # Handle WhatsApp export
-    if query.data.startswith("wa_export_"):
+    if data.startswith("wa_export_"):
         try:
-            parts = query.data.split('_')
+            parts = data.split('_')
             user_id = int(parts[2])
             sticker_count = int(parts[3]) if len(parts) > 3 else 0
             lang = get_user_language(update)
             
-            is_premium = db.is_premium(user_id)
+            is_premium_user = db.is_premium(user_id)
             pack_name = db.get_current_pack_name(user_id)
             
             # Get pack title for branding
-            if is_premium:
+            if is_premium_user:
                 pack_title = db.get_custom_sticker_name(user_id)
             else:
                 pack_title = DEFAULT_STICKER_PACK_TITLE
@@ -1482,9 +1674,9 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     # Handle save pack button
-    if query.data.startswith("savepack_"):
+    if data.startswith("savepack_"):
         try:
-            parts = query.data.split('_')
+            parts = data.split('_')
             user_id = int(parts[1])
             sticker_count = int(parts[2]) if len(parts) > 2 else 0
             
@@ -1506,9 +1698,16 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             db.save_sticker_pack(user_id, pack_name, sticker_count, sticker_set_name)
             
             await query.answer("✅ Pack tersimpan!" if lang == 'id' else "✅ Pack saved!", show_alert=True)
+            
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton(LANGUAGES[lang]['menu_mypacks'], callback_data="menu_mypacks")],
+                [InlineKeyboardButton(LANGUAGES[lang]['back_button'], callback_data="menu_main")]
+            ])
+            
             await query.edit_message_text(
                 LANGUAGES[lang]['pack_saved'].format(pack_name, sticker_count),
-                parse_mode='Markdown'
+                parse_mode='Markdown',
+                reply_markup=keyboard
             )
         except Exception as e:
             print(f"Error saving pack: {e}")
@@ -1518,8 +1717,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     # Handle delete pack button
-    if query.data.startswith("delpack_"):
-        pack_index = int(query.data.split('_')[1])
+    if data.startswith("delpack_"):
+        pack_index = int(data.split('_')[1])
         user_id = query.from_user.id
         lang = get_user_language(update)
         
@@ -1527,14 +1726,19 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if deleted:
             await query.answer(LANGUAGES[lang]['pack_deleted'], show_alert=True)
-            # Create a fake update object for mypacks_command
-            # Instead, just edit the message
+            # Refresh the packs list
             packs = db.get_sticker_packs(user_id)
             
             if not packs or len(packs) == 0:
+                keyboard = InlineKeyboardMarkup([
+                    [InlineKeyboardButton(LANGUAGES[lang]['menu_newpack'], callback_data="menu_newpack")],
+                    [InlineKeyboardButton("📦 Official Pack", url=SAFEROBOT_STICKER_PACK)],
+                    [InlineKeyboardButton(LANGUAGES[lang]['back_button'], callback_data="menu_main")]
+                ])
                 await query.edit_message_text(
                     LANGUAGES[lang]['my_packs_empty'],
-                    parse_mode='Markdown'
+                    parse_mode='Markdown',
+                    reply_markup=keyboard
                 )
             else:
                 msg = LANGUAGES[lang]['my_packs_list'].format(len(packs))
@@ -1558,7 +1762,9 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     row.append(InlineKeyboardButton(f"🗑️", callback_data=f"delpack_{i}"))
                     keyboard.append(row)
                 
-                keyboard.append([InlineKeyboardButton(f"📦 Official SafeRobot Pack", url=SAFEROBOT_STICKER_PACK)])
+                keyboard.append([InlineKeyboardButton(LANGUAGES[lang]['menu_newpack'], callback_data="menu_newpack")])
+                keyboard.append([InlineKeyboardButton("📦 Official SafeRobot Pack", url=SAFEROBOT_STICKER_PACK)])
+                keyboard.append([InlineKeyboardButton(LANGUAGES[lang]['back_button'], callback_data="menu_main")])
                 reply_markup = InlineKeyboardMarkup(keyboard)
                 
                 await query.edit_message_text(msg, parse_mode='Markdown', reply_markup=reply_markup)
@@ -1566,7 +1772,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("❌ Error deleting pack", show_alert=True)
         return
     
-    if query.data == "buy_premium":
+    if data == "buy_premium":
         lang = get_user_language(update)
         
         title = "SafeRobot Premium - 1 Month"
@@ -1587,157 +1793,83 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    if query.data == "refresh_stats":
+    if data == "refresh_stats":
         user_id = query.from_user.id
         
         if not is_owner(user_id):
             await query.answer("❌ Hanya owner!", show_alert=True)
             return
         
-        stats = db.get_stats()
-        top_users = db.get_top_users(5)
-        
-        stats_msg = f"""
-📊 *SAFEROBOT STATISTICS*
-━━━━━━━━━━━━━━━━━━━━
-
-👥 *USER STATISTICS*
-├ Total Users: `{stats['total_users']}`
-├ Active Users (7d): `{stats['active_users']}`
-├ 👑 Premium Users: `{stats['premium_users']}`
-
-🔥 *DOWNLOADS*
-├ Total: `{stats['total_downloads']}`
-├ 🎥 Video: `{stats['video_downloads']}`
-└ 🎵 Audio: `{stats['audio_downloads']}`
-
-🎨 *STICKERS*
-└ Total: `{stats['total_stickers']}`
-
-🏆 *TOP 5 USERS*
-"""
-        
-        for i, user in enumerate(top_users, 1):
-            username = f"@{user['username']}" if user['username'] else user['first_name']
-            premium = "👑" if user.get('is_premium') else ""
-            stats_msg += f"{i}. {username} {premium}- `{user['download_count']}`\n"
-        
-        stats_msg += f"\n🕐 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-        
-        keyboard = [[InlineKeyboardButton("🔄 Refresh", callback_data="refresh_stats")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.edit_message_text(
-            stats_msg,
-            parse_mode='Markdown',
-            reply_markup=reply_markup
-        )
+        await show_stats(update, context)
         return
     
     # Handle download buttons
-    data = query.data.split('|')
-    format_code = data[0]
-    url_id = data[1]
-    lang = data[2] if len(data) > 2 else 'en'
-    
-    url = context.user_data.get(url_id)
-    
-    if not url:
-        await query.message.reply_text(
-            "❌ Link expired! Please send again." if lang == 'en' else "❌ Link kadaluarsa!"
+    if '|' in data:
+        parts = data.split('|')
+        format_code = parts[0]
+        url_id = parts[1]
+        lang = parts[2] if len(parts) > 2 else 'en'
+        
+        url = context.user_data.get(url_id)
+        
+        if not url:
+            await query.message.reply_text(
+                "❌ Link expired! Please send again." if lang == 'en' else "❌ Link kadaluarsa!"
+            )
+            return
+        
+        if format_code == 'v':
+            format_type = 'video'
+        elif format_code == 'a':
+            format_type = 'audio'
+        elif format_code == 'p':
+            format_type = 'photo'
+        else:
+            format_type = 'video'
+        
+        downloading_msg = LANGUAGES[lang]['downloading'].format(
+            LANGUAGES[lang].get(format_type, format_type)
         )
-        return
-    
-    if format_code == 'v':
-        format_type = 'video'
-    elif format_code == 'a':
-        format_type = 'audio'
-    elif format_code == 'p':
-        format_type = 'photo'
-    else:
-        format_type = 'video'
-    
-    downloading_msg = LANGUAGES[lang]['downloading'].format(
-        LANGUAGES[lang].get(format_type, format_type)
-    )
-    status_msg = await query.message.reply_text(downloading_msg)
-    
-    try:
-        is_premium = db.is_premium(query.from_user.id)
-        max_size = PREMIUM_VIDEO_SIZE_LIMIT if is_premium else FREE_VIDEO_SIZE_LIMIT
+        status_msg = await query.message.reply_text(downloading_msg)
         
-        result = await bot.download_media(url, format_type, max_size)
-        
-        if result['success']:
-            await status_msg.edit_text(LANGUAGES[lang]['sending'])
+        try:
+            is_premium_user = db.is_premium(query.from_user.id)
+            max_size = PREMIUM_VIDEO_SIZE_LIMIT if is_premium_user else FREE_VIDEO_SIZE_LIMIT
             
-            filepath = result['filepath']
+            result = await bot.download_media(url, format_type, max_size)
             
-            if not os.path.exists(filepath):
-                await status_msg.edit_text(LANGUAGES[lang]['download_failed'].format("File not found"))
-                return
-            
-            file_size = os.path.getsize(filepath)
-            file_size_mb = file_size / (1024 * 1024)
-            max_telegram_size = 50 * 1024 * 1024  # 50MB Telegram limit
-            
-            # Check file size limits
-            if file_size > max_size:
-                limit_msg = LANGUAGES[lang]['file_too_large_premium'] if is_premium else LANGUAGES[lang]['file_too_large_free']
-                hint = LANGUAGES[lang]['try_smaller'] if is_premium else LANGUAGES[lang]['upgrade_hint']
-                await status_msg.edit_text(
-                    LANGUAGES[lang]['file_too_large'].format(file_size_mb, limit_msg, hint)
-                )
-                if os.path.exists(filepath):
-                    os.remove(filepath)
-                return
-            
-            if format_type == 'photo':
-                caption = LANGUAGES[lang]['photo_caption'].format(result['title'])
-                try:
-                    with open(filepath, 'rb') as photo:
-                        await query.message.reply_photo(
-                            photo=photo,
-                            caption=caption,
-                            parse_mode='Markdown'
-                        )
-                except Exception:
-                    with open(filepath, 'rb') as document:
-                        await query.message.reply_document(
-                            document=document,
-                            caption=caption,
-                            parse_mode='Markdown'
-                        )
-            
-            elif format_type == 'audio':
-                caption = LANGUAGES[lang]['audio_caption'].format(result['title'])
-                with open(filepath, 'rb') as audio:
-                    await query.message.reply_audio(
-                        audio=audio,
-                        title=result['title'],
-                        duration=int(result['duration']) if result['duration'] else None,
-                        caption=caption,
-                        parse_mode='Markdown'
-                    )
-            else:
-                caption = LANGUAGES[lang]['video_caption'].format(result['title'])
+            if result['success']:
+                await status_msg.edit_text(LANGUAGES[lang]['sending'])
                 
-                if file_size > max_telegram_size:
-                    with open(filepath, 'rb') as document:
-                        await query.message.reply_document(
-                            document=document,
-                            caption=caption + "\n\n⚠️ Sent as document (file too large for video)",
-                            parse_mode='Markdown'
-                        )
-                else:
+                filepath = result['filepath']
+                
+                if not os.path.exists(filepath):
+                    await status_msg.edit_text(LANGUAGES[lang]['download_failed'].format("File not found"))
+                    return
+                
+                file_size = os.path.getsize(filepath)
+                file_size_mb = file_size / (1024 * 1024)
+                max_telegram_size = 50 * 1024 * 1024  # 50MB Telegram limit
+                
+                # Check file size limits
+                if file_size > max_size:
+                    limit_msg = LANGUAGES[lang]['file_too_large_premium'] if is_premium_user else LANGUAGES[lang]['file_too_large_free']
+                    hint = LANGUAGES[lang]['try_smaller'] if is_premium_user else LANGUAGES[lang]['upgrade_hint']
+                    await status_msg.edit_text(
+                        LANGUAGES[lang]['file_too_large'].format(file_size_mb, limit_msg, hint)
+                    )
+                    if os.path.exists(filepath):
+                        os.remove(filepath)
+                    return
+                
+                if format_type == 'photo':
+                    caption = LANGUAGES[lang]['photo_caption'].format(result['title'])
                     try:
-                        with open(filepath, 'rb') as video:
-                            await query.message.reply_video(
-                                video=video,
-                                duration=int(result['duration']) if result['duration'] else None,
+                        with open(filepath, 'rb') as photo:
+                            await query.message.reply_photo(
+                                photo=photo,
                                 caption=caption,
-                                parse_mode='Markdown',
-                                supports_streaming=True
+                                parse_mode='Markdown'
                             )
                     except Exception:
                         with open(filepath, 'rb') as document:
@@ -1746,25 +1878,63 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                 caption=caption,
                                 parse_mode='Markdown'
                             )
+                
+                elif format_type == 'audio':
+                    caption = LANGUAGES[lang]['audio_caption'].format(result['title'])
+                    with open(filepath, 'rb') as audio:
+                        await query.message.reply_audio(
+                            audio=audio,
+                            title=result['title'],
+                            duration=int(result['duration']) if result['duration'] else None,
+                            caption=caption,
+                            parse_mode='Markdown'
+                        )
+                else:
+                    caption = LANGUAGES[lang]['video_caption'].format(result['title'])
+                    
+                    if file_size > max_telegram_size:
+                        with open(filepath, 'rb') as document:
+                            await query.message.reply_document(
+                                document=document,
+                                caption=caption + "\n\n⚠️ Sent as document (file too large for video)",
+                                parse_mode='Markdown'
+                            )
+                    else:
+                        try:
+                            with open(filepath, 'rb') as video:
+                                await query.message.reply_video(
+                                    video=video,
+                                    duration=int(result['duration']) if result['duration'] else None,
+                                    caption=caption,
+                                    parse_mode='Markdown',
+                                    supports_streaming=True
+                                )
+                        except Exception:
+                            with open(filepath, 'rb') as document:
+                                await query.message.reply_document(
+                                    document=document,
+                                    caption=caption,
+                                    parse_mode='Markdown'
+                                )
+                
+                db.increment_download(query.from_user.id, format_type)
+                await status_msg.delete()
+                
+                if os.path.exists(filepath):
+                    os.remove(filepath)
+                
+                if url_id in context.user_data:
+                    del context.user_data[url_id]
             
-            db.increment_download(query.from_user.id, format_type)
-            await status_msg.delete()
-            
-            if os.path.exists(filepath):
-                os.remove(filepath)
-            
-            if url_id in context.user_data:
-                del context.user_data[url_id]
+            else:
+                error_msg = LANGUAGES[lang]['download_failed'].format(result['error'])
+                await status_msg.edit_text(error_msg)
         
-        else:
-            error_msg = LANGUAGES[lang]['download_failed'].format(result['error'])
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            error_msg = LANGUAGES[lang]['error_occurred'].format(str(e))
             await status_msg.edit_text(error_msg)
-    
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        error_msg = LANGUAGES[lang]['error_occurred'].format(str(e))
-        await status_msg.edit_text(error_msg)
 
 async def precheckout_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler untuk pre-checkout query"""
@@ -1782,9 +1952,15 @@ async def successful_payment_callback(update: Update, context: ContextTypes.DEFA
         premium_until.strftime('%Y-%m-%d %H:%M')
     )
     
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton(LANGUAGES[lang]['menu_customname'], callback_data="menu_customname")],
+        [InlineKeyboardButton(LANGUAGES[lang]['back_button'], callback_data="menu_main")]
+    ])
+    
     await update.message.reply_text(
         success_msg,
-        parse_mode='Markdown'
+        parse_mode='Markdown',
+        reply_markup=keyboard
     )
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1795,8 +1971,9 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     """Fungsi utama untuk menjalankan bot"""
-    print("🤖 SafeRobot v5.0 Starting...")
+    print("🤖 SafeRobot v6.0 Starting...")
     print("🎨 Features: Multi-platform Download + WhatsApp Sticker Export")
+    print("🔘 NEW: Button-based menu (no commands needed!)")
     print("📦 Default Pack Name:", DEFAULT_STICKER_PACK_TITLE)
     print("👑 Premium: 250MB download, custom name, unlimited stickers")
     print("✅ Supported: YouTube, TikTok, Instagram, Pinterest, Facebook, X/Twitter")
@@ -1805,64 +1982,36 @@ def main():
     
     application = Application.builder().token(BOT_TOKEN).build()
     
-    # Conversation handler untuk newpack
-    newpack_conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("newpack", newpack_command)],
-        states={
-            WAITING_PACK_NAME: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_pack_name)
-            ],
-        },
-        fallbacks=[
-            CallbackQueryHandler(cancel_newpack, pattern="^cancel_newpack$"),
-            CommandHandler("cancel", lambda u, c: ConversationHandler.END)
-        ],
-    )
-    
-    # Conversation handler untuk customname (premium only)
-    customname_conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("customname", customname_command)],
-        states={
-            WAITING_CUSTOM_NAME: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_custom_name)
-            ],
-        },
-        fallbacks=[
-            CallbackQueryHandler(cancel_customname, pattern="^cancel_customname$"),
-            CommandHandler("cancel", lambda u, c: ConversationHandler.END)
-        ],
-    )
-    
-    # Add handlers
+    # Add handlers - Only /start command needed, everything else via buttons!
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("stats", stats_command))
-    application.add_handler(CommandHandler("broadcast", broadcast_command))
-    application.add_handler(CommandHandler("premium", premium_command))
-    application.add_handler(CommandHandler("mystatus", mystatus_command))
-    application.add_handler(CommandHandler("mypacks", mypacks_command))
-    application.add_handler(newpack_conv_handler)
-    application.add_handler(customname_conv_handler)
     
+    # Photo handler
     application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    
+    # Text message handler (for URLs and input responses)
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    
+    # Callback query handler for all buttons
     application.add_handler(CallbackQueryHandler(button_callback))
     
+    # Payment handlers
     application.add_handler(PreCheckoutQueryHandler(precheckout_callback))
     application.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment_callback))
     
+    # Error handler
     application.add_error_handler(error_handler)
     
-    print("✅ SafeRobot is running!")
-    print("\n📋 Owner commands:")
-    print("   /stats - View statistics")
-    print("   /broadcast <message> - Send to all users")
-    print("\n👤 User commands:")
-    print("   /start - Start bot")
-    print("   /newpack - Create new sticker pack")
-    print("   /mypacks - View saved packs")
-    print("   /customname - Custom pack name (Premium)")
-    print("   /mystatus - Check status")
-    print("   /premium - Premium info")
+    print("\n✅ SafeRobot is running!")
+    print("\n🔘 BUTTON-BASED INTERFACE:")
+    print("   Just type /start to see the main menu with all buttons!")
+    print("\n📱 Menu Buttons:")
+    print("   📦 Buat Pack Baru - Create new sticker pack")
+    print("   📦 Pack Saya - View saved packs")
+    print("   📊 Status Saya - Check your status")
+    print("   👑 Premium - Upgrade info")
+    print("   ✏️ Custom Nama - Custom pack name (Premium)")
+    print("   ℹ️ Tentang - About the bot")
+    print("\n👑 Owner has additional 📈 Statistik button")
     print(f"\n📦 Official Pack: {SAFEROBOT_STICKER_PACK}")
     print("\nPress Ctrl+C to stop")
     
