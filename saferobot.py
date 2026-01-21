@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-SafeRobot v6.0 - Telegram Bot
+SafeRobot v7.0 - Telegram Bot
 Multi-platform downloader & Sticker maker with WhatsApp support
 Enhanced features: YouTube, TikTok, Instagram, Pinterest, Facebook, X/Twitter
 Now with BUTTON-BASED MENU (no commands needed!)
+NEW: Add Sticker feature + Instagram Music download!
 """
 
 import os
@@ -13,8 +14,9 @@ import asyncio
 import json
 import zipfile
 import io
+import tempfile
 from datetime import datetime, timedelta
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice, InputSticker
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes, PreCheckoutQueryHandler, ConversationHandler
 import yt_dlp
 from urllib.parse import urlparse
@@ -42,6 +44,7 @@ PREMIUM_VIDEO_SIZE_LIMIT = 250 * 1024 * 1024  # 250 MB untuk premium
 # State untuk conversation handler
 WAITING_PACK_NAME = 1
 WAITING_CUSTOM_NAME = 2
+WAITING_EMOJI = 3
 
 if not os.path.exists(DOWNLOAD_PATH):
     os.makedirs(DOWNLOAD_PATH)
@@ -408,11 +411,32 @@ Terima kasih! 🙏""",
         'photo_caption': "📷 *{}*\n\n🔥 by SafeRobot",
         'sticker_limit_reached': "⚠️ *Limit tercapai!*\n\nAnda sudah buat {} stiker.\n\n💡 Tekan tombol 📦 Buat Pack Baru\n👑 Atau upgrade PREMIUM!",
         'processing_sticker': "🎨 Memproses gambar...",
+        'processing_add_sticker': "🎨 Menambahkan sticker ke pack Anda...",
         'download_failed': "❌ Download gagal!\n\nError: {}\n\nCoba link lain.",
         'error_occurred': "❌ Error: {}",
         'video_button': "🎥 Video (MP4)",
         'audio_button': "🎵 Audio (MP3)",
+        'music_button': "🎵 Musik (MP3)",
         'photo_button': "📷 Foto",
+        'add_sticker_success': """✅ *Sticker Ditambahkan!*
+
+📦 Pack: {}
+📛 Judul: {}
+🎨 Total stiker: {}
+🎯 Sisa: {}
+
+💡 Kirim sticker lagi untuk menambahkan lebih banyak!""",
+        'add_sticker_info': """🎨 *Tambah Sticker*
+
+Kirim sticker apa saja untuk ditambahkan ke pack Anda!
+
+📦 Pack saat ini: {}
+📛 Judul: {}
+
+💡 Tip: Anda bisa forward sticker dari chat lain!""",
+        'no_pack_created': "❌ Anda belum punya pack!\n\n💡 Tekan tombol 📦 Buat Pack Baru untuk memulai.",
+        'sticker_added_to_telegram': "✅ Sticker berhasil ditambahkan ke pack Telegram Anda!",
+        'menu_addsticker': "➕ Tambah Sticker",
         'menu_about': "ℹ️ Tentang",
         'menu_premium': "👑 Premium",
         'menu_start': "🏠 Menu Utama",
@@ -522,11 +546,32 @@ Thank you! 🙏""",
         'photo_caption': "📷 *{}*\n\n🔥 by SafeRobot",
         'sticker_limit_reached': "⚠️ *Limit reached!*\n\nYou've created {} stickers.\n\n💡 Press 📦 Create New Pack button\n👑 Or upgrade PREMIUM!",
         'processing_sticker': "🎨 Processing image...",
+        'processing_add_sticker': "🎨 Adding sticker to your pack...",
         'download_failed': "❌ Download failed!\n\nError: {}\n\nTry another link.",
         'error_occurred': "❌ Error: {}",
         'video_button': "🎥 Video (MP4)",
         'audio_button': "🎵 Audio (MP3)",
+        'music_button': "🎵 Music (MP3)",
         'photo_button': "📷 Photo",
+        'add_sticker_success': """✅ *Sticker Added!*
+
+📦 Pack: {}
+📛 Title: {}
+🎨 Total stickers: {}
+🎯 Remaining: {}
+
+💡 Send another sticker to add more!""",
+        'add_sticker_info': """🎨 *Add Sticker*
+
+Send any sticker to add it to your pack!
+
+📦 Current pack: {}
+📛 Title: {}
+
+💡 Tip: You can forward stickers from other chats!""",
+        'no_pack_created': "❌ You don't have a pack yet!\n\n💡 Press 📦 Create New Pack button to start.",
+        'sticker_added_to_telegram': "✅ Sticker successfully added to your Telegram pack!",
+        'menu_addsticker': "➕ Add Sticker",
         'menu_about': "ℹ️ About",
         'menu_premium': "👑 Premium",
         'menu_start': "🏠 Main Menu",
@@ -572,11 +617,14 @@ def get_main_menu_keyboard(lang: str, is_owner: bool = False):
             InlineKeyboardButton(LANGUAGES[lang]['menu_mypacks'], callback_data="menu_mypacks")
         ],
         [
-            InlineKeyboardButton(LANGUAGES[lang]['menu_mystatus'], callback_data="menu_mystatus"),
-            InlineKeyboardButton(LANGUAGES[lang]['menu_premium'], callback_data="menu_premium")
+            InlineKeyboardButton(LANGUAGES[lang]['menu_addsticker'], callback_data="menu_addsticker"),
+            InlineKeyboardButton(LANGUAGES[lang]['menu_mystatus'], callback_data="menu_mystatus")
         ],
         [
-            InlineKeyboardButton(LANGUAGES[lang]['menu_customname'], callback_data="menu_customname"),
+            InlineKeyboardButton(LANGUAGES[lang]['menu_premium'], callback_data="menu_premium"),
+            InlineKeyboardButton(LANGUAGES[lang]['menu_customname'], callback_data="menu_customname")
+        ],
+        [
             InlineKeyboardButton(LANGUAGES[lang]['menu_about'], callback_data="menu_about")
         ],
         [
@@ -710,8 +758,8 @@ class SafeRobot:
             if os.path.exists(cookies_file):
                 ydl_opts['cookiefile'] = cookies_file
             
-            if format_type == 'audio':
-                # Enhanced audio configuration
+            if format_type == 'audio' or format_type == 'music':
+                # Enhanced audio configuration for both audio and Instagram music
                 ydl_opts.update({
                     'format': 'bestaudio[ext=m4a]/bestaudio/best',
                     'postprocessors': [{
@@ -1147,6 +1195,310 @@ async def cancel_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Return to stats
     await show_stats(update, context)
 
+async def show_addsticker_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show add sticker info via button"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    lang = get_user_language(update)
+    
+    user_data = db.get_user(user_id)
+    if not user_data:
+        await query.answer("❌ User not found!", show_alert=True)
+        return
+    
+    pack_name = db.get_current_pack_name(user_id)
+    is_premium_user = db.is_premium(user_id)
+    
+    if is_premium_user:
+        pack_title = db.get_custom_sticker_name(user_id)
+    else:
+        pack_title = DEFAULT_STICKER_PACK_TITLE
+    
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton(LANGUAGES[lang]['menu_newpack'], callback_data="menu_newpack")],
+        [InlineKeyboardButton("📦 Official Pack", url=SAFEROBOT_STICKER_PACK)],
+        [InlineKeyboardButton(LANGUAGES[lang]['back_button'], callback_data="menu_main")]
+    ])
+    
+    await query.edit_message_text(
+        LANGUAGES[lang]['add_sticker_info'].format(pack_name, pack_title),
+        parse_mode='Markdown',
+        reply_markup=keyboard
+    )
+
+async def handle_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handler untuk sticker - menambahkan sticker yang dikirim user ke pack mereka"""
+    user = update.effective_user
+    user_id = user.id
+    lang = get_user_language(update)
+    
+    db.add_or_update_user(user.id, user.username, user.first_name, user.language_code)
+    
+    user_data = db.get_user(user_id)
+    is_premium_user = db.is_premium(user_id)
+    
+    # Check sticker limit for free users
+    if not is_premium_user:
+        if user_data['current_sticker_pack_count'] >= FREE_STICKER_LIMIT:
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton(LANGUAGES[lang]['menu_newpack'], callback_data="menu_newpack")],
+                [InlineKeyboardButton(LANGUAGES[lang]['menu_premium'], callback_data="menu_premium")]
+            ])
+            await update.message.reply_text(
+                LANGUAGES[lang]['sticker_limit_reached'].format(FREE_STICKER_LIMIT),
+                parse_mode='Markdown',
+                reply_markup=keyboard
+            )
+            return
+    
+    status_msg = await update.message.reply_text(LANGUAGES[lang]['processing_add_sticker'])
+    
+    try:
+        sticker = update.message.sticker
+        
+        # Get the sticker file
+        sticker_file = await context.bot.get_file(sticker.file_id)
+        
+        # Download the sticker
+        timestamp = datetime.now().timestamp()
+        
+        # Determine file extension based on sticker type
+        if sticker.is_animated:
+            temp_path = f"{STICKER_PATH}temp_sticker_{user_id}_{timestamp}.tgs"
+            sticker_format = "animated"
+        elif sticker.is_video:
+            temp_path = f"{STICKER_PATH}temp_sticker_{user_id}_{timestamp}.webm"
+            sticker_format = "video"
+        else:
+            temp_path = f"{STICKER_PATH}temp_sticker_{user_id}_{timestamp}.webp"
+            sticker_format = "static"
+        
+        await sticker_file.download_to_drive(temp_path)
+        
+        # Get pack info
+        pack_name = db.get_current_pack_name(user_id)
+        
+        if is_premium_user:
+            pack_title = db.get_custom_sticker_name(user_id)
+        else:
+            pack_title = DEFAULT_STICKER_PACK_TITLE
+        
+        # Create or add to sticker set
+        bot_username = (await context.bot.get_me()).username
+        safe_pack_name = re.sub(r'[^a-zA-Z0-9]', '', pack_name.lower())[:20]
+        if not safe_pack_name:
+            safe_pack_name = "pack"
+        sticker_set_name = f"u{user_id}_{safe_pack_name}_by_{bot_username}".lower()
+        
+        sticker_set_url = None
+        sticker_set_created = False
+        
+        # Get emoji from original sticker or use default
+        emoji_list = [sticker.emoji] if sticker.emoji else ["😀"]
+        
+        try:
+            # Check if sticker set exists
+            existing_set = await context.bot.get_sticker_set(sticker_set_name)
+            
+            # Set exists, add new sticker
+            try:
+                with open(temp_path, 'rb') as f:
+                    await context.bot.add_sticker_to_set(
+                        user_id=user_id,
+                        name=sticker_set_name,
+                        sticker=InputSticker(
+                            sticker=f,
+                            emoji_list=emoji_list,
+                            format=sticker_format
+                        )
+                    )
+                sticker_set_url = f"https://t.me/addstickers/{sticker_set_name}"
+                sticker_set_created = True
+                db.set_current_sticker_set_name(user_id, sticker_set_name)
+            except Exception as add_error:
+                print(f"Error adding sticker to existing set: {add_error}")
+                # Try with static format as fallback
+                if sticker_format != "static":
+                    try:
+                        # Convert to static PNG
+                        png_path = f"{STICKER_PATH}converted_{user_id}_{timestamp}.png"
+                        if await convert_sticker_to_png(temp_path, png_path):
+                            with open(png_path, 'rb') as f:
+                                await context.bot.add_sticker_to_set(
+                                    user_id=user_id,
+                                    name=sticker_set_name,
+                                    sticker=InputSticker(
+                                        sticker=f,
+                                        emoji_list=emoji_list,
+                                        format="static"
+                                    )
+                                )
+                            sticker_set_url = f"https://t.me/addstickers/{sticker_set_name}"
+                            sticker_set_created = True
+                            db.set_current_sticker_set_name(user_id, sticker_set_name)
+                            if os.path.exists(png_path):
+                                os.remove(png_path)
+                    except Exception as convert_error:
+                        print(f"Conversion fallback failed: {convert_error}")
+                        raise add_error
+                else:
+                    raise add_error
+                
+        except Exception as get_error:
+            # Sticker set doesn't exist, create new one
+            try:
+                full_pack_title = f"{pack_name} - {pack_title}"
+                if len(full_pack_title) > 64:
+                    full_pack_title = full_pack_title[:64]
+                
+                with open(temp_path, 'rb') as f:
+                    await context.bot.create_new_sticker_set(
+                        user_id=user_id,
+                        name=sticker_set_name,
+                        title=full_pack_title,
+                        stickers=[
+                            InputSticker(
+                                sticker=f,
+                                emoji_list=emoji_list,
+                                format=sticker_format
+                            )
+                        ],
+                        sticker_type="regular"
+                    )
+                sticker_set_url = f"https://t.me/addstickers/{sticker_set_name}"
+                sticker_set_created = True
+                db.set_current_sticker_set_name(user_id, sticker_set_name)
+            except Exception as create_error:
+                print(f"Error creating sticker set: {create_error}")
+                # Try with static format as fallback
+                if sticker_format != "static":
+                    try:
+                        png_path = f"{STICKER_PATH}converted_{user_id}_{timestamp}.png"
+                        if await convert_sticker_to_png(temp_path, png_path):
+                            with open(png_path, 'rb') as f:
+                                await context.bot.create_new_sticker_set(
+                                    user_id=user_id,
+                                    name=sticker_set_name,
+                                    title=full_pack_title,
+                                    stickers=[
+                                        InputSticker(
+                                            sticker=f,
+                                            emoji_list=emoji_list,
+                                            format="static"
+                                        )
+                                    ],
+                                    sticker_type="regular"
+                                )
+                            sticker_set_url = f"https://t.me/addstickers/{sticker_set_name}"
+                            sticker_set_created = True
+                            db.set_current_sticker_set_name(user_id, sticker_set_name)
+                            if os.path.exists(png_path):
+                                os.remove(png_path)
+                    except Exception as convert_error:
+                        print(f"Conversion fallback for new set failed: {convert_error}")
+                        raise create_error
+                else:
+                    raise create_error
+        
+        # Cleanup temp file
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+        
+        if sticker_set_created:
+            db.increment_sticker(user_id)
+            
+            # Get updated count
+            user_data = db.get_user(user_id)
+            current_count = user_data['current_sticker_pack_count']
+            
+            remaining = "Unlimited ♾️" if is_premium_user else f"{FREE_STICKER_LIMIT - current_count}"
+            
+            # Build keyboard buttons
+            keyboard = []
+            if sticker_set_url:
+                keyboard.append([
+                    InlineKeyboardButton(
+                        f"➕ Tambahkan {current_count} stiker ke Telegram" if lang == 'id' else f"➕ Add {current_count} stickers to Telegram",
+                        url=sticker_set_url
+                    )
+                ])
+            
+            # Save pack button if 3+ stickers
+            if current_count >= 3:
+                keyboard.append([
+                    InlineKeyboardButton(
+                        LANGUAGES[lang]['save_pack_button'],
+                        callback_data=f"savepack_{user_id}_{current_count}"
+                    )
+                ])
+            
+            # Menu buttons
+            keyboard.append([
+                InlineKeyboardButton(LANGUAGES[lang]['menu_newpack'], callback_data="menu_newpack"),
+                InlineKeyboardButton(LANGUAGES[lang]['menu_mypacks'], callback_data="menu_mypacks")
+            ])
+            
+            keyboard.append([
+                InlineKeyboardButton("📦 Official SafeRobot Pack", url=SAFEROBOT_STICKER_PACK)
+            ])
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await status_msg.edit_text(
+                LANGUAGES[lang]['add_sticker_success'].format(
+                    pack_name, pack_title, current_count, remaining
+                ),
+                parse_mode='Markdown',
+                reply_markup=reply_markup
+            )
+        else:
+            await status_msg.edit_text(
+                "❌ Gagal menambahkan sticker. Coba lagi!" if lang == 'id' else "❌ Failed to add sticker. Try again!"
+            )
+    
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        await status_msg.edit_text(
+            LANGUAGES[lang]['error_occurred'].format(str(e))
+        )
+
+async def convert_sticker_to_png(input_path: str, output_path: str) -> bool:
+    """Convert sticker to PNG format for compatibility"""
+    try:
+        if input_path.endswith('.webp'):
+            img = Image.open(input_path)
+            if img.mode != 'RGBA':
+                img = img.convert('RGBA')
+            
+            # Resize to 512x512 if needed
+            original_width, original_height = img.size
+            max_size = 512
+            
+            if original_width > max_size or original_height > max_size:
+                if original_width > original_height:
+                    new_width = max_size
+                    new_height = int((max_size / original_width) * original_height)
+                else:
+                    new_height = max_size
+                    new_width = int((max_size / original_height) * original_width)
+                
+                img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            
+            canvas = Image.new('RGBA', (512, 512), (0, 0, 0, 0))
+            offset_x = (512 - img.width) // 2
+            offset_y = (512 - img.height) // 2
+            canvas.paste(img, (offset_x, offset_y), img if img.mode == 'RGBA' else None)
+            
+            canvas.save(output_path, 'PNG', optimize=True)
+            return True
+        return False
+    except Exception as e:
+        print(f"Error converting sticker: {e}")
+        return False
+
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler untuk foto - membuat sticker dan tambahkan ke sticker set Telegram"""
     user = update.effective_user
@@ -1530,6 +1882,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     callback_data=f"v|{url_id}|{lang}"
                 ),
                 InlineKeyboardButton(
+                    LANGUAGES[lang]['music_button'], 
+                    callback_data=f"m|{url_id}|{lang}"
+                )
+            ],
+            [
+                InlineKeyboardButton(
                     LANGUAGES[lang]['photo_button'], 
                     callback_data=f"p|{url_id}|{lang}"
                 )
@@ -1596,6 +1954,9 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     elif data == "menu_customname":
         await start_customname(update, context)
+        return
+    elif data == "menu_addsticker":
+        await show_addsticker_info(update, context)
         return
     elif data == "menu_stats":
         await show_stats(update, context)
@@ -1822,6 +2183,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             format_type = 'video'
         elif format_code == 'a':
             format_type = 'audio'
+        elif format_code == 'm':
+            format_type = 'music'  # Instagram music
         elif format_code == 'p':
             format_type = 'photo'
         else:
@@ -1879,8 +2242,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                 parse_mode='Markdown'
                             )
                 
-                elif format_type == 'audio':
+                elif format_type == 'audio' or format_type == 'music':
                     caption = LANGUAGES[lang]['audio_caption'].format(result['title'])
+                    # Add Instagram music indicator if applicable
+                    if format_type == 'music':
+                        caption = f"🎵 *Instagram Music*\n{result['title']}\n\n🔥 by SafeRobot"
                     with open(filepath, 'rb') as audio:
                         await query.message.reply_audio(
                             audio=audio,
@@ -1971,9 +2337,11 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     """Fungsi utama untuk menjalankan bot"""
-    print("🤖 SafeRobot v6.0 Starting...")
+    print("🤖 SafeRobot v7.0 Starting...")
     print("🎨 Features: Multi-platform Download + WhatsApp Sticker Export")
-    print("🔘 NEW: Button-based menu (no commands needed!)")
+    print("🔘 Button-based menu (no commands needed!)")
+    print("➕ NEW: Add Sticker feature - send any sticker to add to your pack!")
+    print("🎵 NEW: Instagram Music download!")
     print("📦 Default Pack Name:", DEFAULT_STICKER_PACK_TITLE)
     print("👑 Premium: 250MB download, custom name, unlimited stickers")
     print("✅ Supported: YouTube, TikTok, Instagram, Pinterest, Facebook, X/Twitter")
@@ -1987,6 +2355,9 @@ def main():
     
     # Photo handler
     application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    
+    # Sticker handler - for adding stickers to pack
+    application.add_handler(MessageHandler(filters.Sticker.ALL, handle_sticker))
     
     # Text message handler (for URLs and input responses)
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
@@ -2007,10 +2378,12 @@ def main():
     print("\n📱 Menu Buttons:")
     print("   📦 Buat Pack Baru - Create new sticker pack")
     print("   📦 Pack Saya - View saved packs")
+    print("   ➕ Tambah Sticker - Add stickers by sending them!")
     print("   📊 Status Saya - Check your status")
     print("   👑 Premium - Upgrade info")
     print("   ✏️ Custom Nama - Custom pack name (Premium)")
     print("   ℹ️ Tentang - About the bot")
+    print("\n🎵 Instagram Music: Send IG link and choose Music option!")
     print("\n👑 Owner has additional 📈 Statistik button")
     print(f"\n📦 Official Pack: {SAFEROBOT_STICKER_PACK}")
     print("\nPress Ctrl+C to stop")
