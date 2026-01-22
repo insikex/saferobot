@@ -1,0 +1,5 @@
+# SafeGuard Bot - Telegram Group Protection
+# Python 3.10+ required
+
+python-telegram-bot[job-queue]==21.3
+python-telegram-bot[rate-limiter]==21.3
