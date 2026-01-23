@@ -467,27 +467,32 @@ class SafeRobot:
                 'doodstream.com', 'dood.to', 'dood.watch', 'dood.pm', 
                 'dood.wf', 'dood.cx', 'dood.sh', 'dood.so', 
                 'dood.ws', 'dood.yt', 'dood.re', 'dood-hd.com',
-                'dood.la', 'ds2play.com', 'd0o0d.com', 'do0od.com'
+                'dood.la', 'ds2play.com', 'd0o0d.com', 'do0od.com',
+                'd000d.com', 'dooood.com', 'dood.video'
             ],
             'terabox': [
                 'terabox.com', '1024terabox.com', 'teraboxapp.com',
                 'terabox.fun', 'terabox.link', '4funbox.com',
-                'mirrobox.com', 'nephobox.com', '1024tera.com'
+                'mirrobox.com', 'nephobox.com', '1024tera.com',
+                'teraboxlink.com', 'terafileshare.com'
             ],
             'videy': [
                 'vidoy.com', 'vidoy.cam', 'videypro.live', 'videyaio.com',
                 'videy.co', 'videy.la', 'vide-q.com', 'vide0.me',
-                'vide6.com', 'videw.online', 'vidqy.co', 'vidbre.org'
+                'vide6.com', 'videw.online', 'vidqy.co', 'vidbre.org',
+                'vidgo.blog', 'vidgo.pro', 'vidgo.cc', 'vidgo.to'
             ],
             'videq': [
                 'videq.io', 'videq.pw', 'videqs.com', 'videq.info',
                 'videq.tel', 'videq.wtf', 'videq.app', 'videq.video',
                 'videq.my', 'videq.boo', 'videq.cloud', 'videq.net',
                 'videq.co', 'videq.me', 'videq.org', 'videq.pro',
-                'videq.xyz', 'cdnvideq.net', 'avdeq.ink'
+                'videq.xyz', 'cdnvideq.net', 'avdeq.ink',
+                'vdaq.de', 'vdaq.co', 'vdaq.cc', 'vdaq.io'
             ],
             'lulu': [
-                'lulustream.com', 'lulu.st', 'lixstream.com'
+                'lulustream.com', 'lulu.st', 'lixstream.com',
+                'luluvdo.com', 'luluhost.com'
             ],
             'twimg': [
                 'videotwimg.app', 'video.twlmg.org', 'cdn.twlmg.org',
@@ -495,17 +500,38 @@ class SafeRobot:
                 'tvimg.net', 'video.tvimg.net'
             ],
             'vidcloud': [
-                'vidcloudmv.org', 'vidcloud.co', 'vidcloud9.com'
+                'vidcloudmv.org', 'vidcloud.co', 'vidcloud9.com',
+                'vidcloud.pro', 'vidcloud.icu'
             ],
             'vidpy': [
                 'cdn.vidpy.co', 'cdn.vidpy.cc', 'vidpy.co', 'vidpy.cc'
             ],
+            'uplad': [
+                'upl.ad', 'upl.io', 'upload.do', 'uploaddo.com'
+            ],
+            'filemoon': [
+                'filemoon.sx', 'filemoon.to', 'filemoon.in',
+                'filemoon.link', 'filemoon.nl', 'kerapoxy.cc'
+            ],
+            'streamwish': [
+                'streamwish.to', 'streamwish.com', 'swdyu.com',
+                'wishembed.pro', 'strwish.xyz', 'awish.pro'
+            ],
+            'vidhide': [
+                'vidhide.com', 'vidhidepro.com', 'vidhideplus.com',
+                'vidhidevip.com'
+            ],
             'other_streaming': [
-                'upl.ad', 'vide.cx', 'vid.boats', 'vid.promo',
+                'vide.cx', 'vid.boats', 'vid.promo',
                 'video.twing.plus', 'myvidplay.com', 'streamtape.com',
                 'mixdrop.to', 'mixdrop.co', 'upstream.to', 'mp4upload.com',
                 'streamlare.com', 'fembed.com', 'femax20.com', 'fcdn.stream',
-                'embedsito.com', 'embedstream.me', 'vidoza.net', 'vidlox.me'
+                'embedsito.com', 'embedstream.me', 'vidoza.net', 'vidlox.me',
+                'voe.sx', 'voe-unblock.com', 'voeunbl0ck.com',
+                'supervideo.cc', 'supervideo.tv', 'vidmoly.to', 'vidmoly.me',
+                'vtube.to', 'vtube.network', 'streamsb.net', 'sbembed.com',
+                'sbcloud.pro', 'sbplay.org', 'cloudemb.com', 'tubeload.co',
+                'vidfast.co', 'fastupload.io', 'hexupload.net', 'turboviplay.com'
             ]
         }
         
@@ -546,6 +572,477 @@ class SafeRobot:
             return 'streaming'
         return 'unknown'
     
+    async def extract_with_selenium(self, url):
+        """Fallback: Ekstrak video URL menggunakan Selenium untuk situs dengan JavaScript berat"""
+        video_urls = []
+        driver = None
+        
+        try:
+            from selenium import webdriver
+            from selenium.webdriver.chrome.options import Options
+            from selenium.webdriver.chrome.service import Service
+            from selenium.webdriver.common.by import By
+            from selenium.webdriver.support.ui import WebDriverWait
+            from selenium.webdriver.support import expected_conditions as EC
+            
+            # Try to use webdriver-manager for automatic driver management
+            try:
+                from webdriver_manager.chrome import ChromeDriverManager
+                service = Service(ChromeDriverManager().install())
+            except:
+                service = None
+            
+            # Setup Chrome options
+            chrome_options = Options()
+            chrome_options.add_argument('--headless')
+            chrome_options.add_argument('--no-sandbox')
+            chrome_options.add_argument('--disable-dev-shm-usage')
+            chrome_options.add_argument('--disable-gpu')
+            chrome_options.add_argument('--window-size=1920,1080')
+            chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+            chrome_options.add_argument('--disable-blink-features=AutomationControlled')
+            chrome_options.add_experimental_option('excludeSwitches', ['enable-automation'])
+            chrome_options.add_experimental_option('useAutomationExtension', False)
+            
+            # Initialize driver
+            if service:
+                driver = webdriver.Chrome(service=service, options=chrome_options)
+            else:
+                driver = webdriver.Chrome(options=chrome_options)
+            
+            # Set page load timeout
+            driver.set_page_load_timeout(60)
+            
+            # Navigate to URL
+            print(f"[Selenium] Loading page: {url}")
+            driver.get(url)
+            
+            # Wait for page to load
+            await asyncio.sleep(5)
+            
+            # Wait for video element or player to appear
+            try:
+                WebDriverWait(driver, 15).until(
+                    EC.presence_of_element_located((By.TAG_NAME, "video"))
+                )
+            except:
+                pass
+            
+            # Execute JavaScript to find video URLs
+            js_script = """
+            var urls = [];
+            
+            // Check video elements
+            document.querySelectorAll('video').forEach(function(v) {
+                if (v.src) urls.push(v.src);
+                if (v.currentSrc) urls.push(v.currentSrc);
+                v.querySelectorAll('source').forEach(function(s) {
+                    if (s.src) urls.push(s.src);
+                });
+            });
+            
+            // Check for common player objects
+            if (typeof jwplayer !== 'undefined') {
+                try {
+                    var p = jwplayer();
+                    if (p && p.getPlaylist) {
+                        var pl = p.getPlaylist();
+                        if (pl && pl.length > 0) {
+                            pl.forEach(function(item) {
+                                if (item.file) urls.push(item.file);
+                                if (item.sources) {
+                                    item.sources.forEach(function(s) {
+                                        if (s.file) urls.push(s.file);
+                                    });
+                                }
+                            });
+                        }
+                    }
+                } catch(e) {}
+            }
+            
+            // Check for Plyr
+            if (typeof Plyr !== 'undefined') {
+                try {
+                    document.querySelectorAll('.plyr').forEach(function(el) {
+                        if (el.plyr && el.plyr.source) {
+                            urls.push(el.plyr.source);
+                        }
+                    });
+                } catch(e) {}
+            }
+            
+            // Check for video.js
+            if (typeof videojs !== 'undefined') {
+                try {
+                    var players = videojs.getPlayers();
+                    for (var id in players) {
+                        if (players[id] && players[id].currentSrc) {
+                            urls.push(players[id].currentSrc());
+                        }
+                    }
+                } catch(e) {}
+            }
+            
+            // Check network requests for video URLs
+            if (window.performance && window.performance.getEntries) {
+                window.performance.getEntries().forEach(function(entry) {
+                    if (entry.name && (entry.name.includes('.mp4') || 
+                        entry.name.includes('.m3u8') || 
+                        entry.name.includes('.webm'))) {
+                        urls.push(entry.name);
+                    }
+                });
+            }
+            
+            return urls;
+            """
+            
+            found_urls = driver.execute_script(js_script)
+            if found_urls:
+                video_urls.extend(found_urls)
+            
+            # Also get page source for regex extraction
+            page_source = driver.page_source
+            
+            # Look for video URLs in page source
+            video_patterns = [
+                r'(?:src|source|file|video|stream)["\']?\s*[:=]\s*["\']([^"\']+\.(?:mp4|m3u8|webm)[^"\']*)["\']',
+                r'https?://[^\s"\'<>]+\.(?:mp4|m3u8|webm)(?:\?[^\s"\'<>]*)?',
+            ]
+            
+            for pattern in video_patterns:
+                matches = re.findall(pattern, page_source, re.IGNORECASE)
+                video_urls.extend(matches)
+            
+            print(f"[Selenium] Found {len(video_urls)} potential video URLs")
+            
+        except ImportError:
+            print("[Selenium] Selenium not installed, skipping browser extraction")
+        except Exception as e:
+            print(f"[Selenium] Error: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            if driver:
+                try:
+                    driver.quit()
+                except:
+                    pass
+        
+        return video_urls
+    
+    async def extract_with_playwright(self, url):
+        """Fallback: Ekstrak video URL menggunakan Playwright untuk situs dengan JavaScript berat"""
+        video_urls = []
+        browser = None
+        
+        try:
+            from playwright.async_api import async_playwright
+            
+            print(f"[Playwright] Loading page: {url}")
+            
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(
+                    headless=True,
+                    args=['--no-sandbox', '--disable-dev-shm-usage']
+                )
+                
+                context = await browser.new_context(
+                    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    viewport={'width': 1920, 'height': 1080}
+                )
+                
+                # Listen for network requests
+                network_urls = []
+                
+                async def handle_response(response):
+                    url = response.url
+                    if any(ext in url.lower() for ext in ['.mp4', '.m3u8', '.webm', 'stream', 'video']):
+                        network_urls.append(url)
+                
+                page = await context.new_page()
+                page.on('response', handle_response)
+                
+                await page.goto(url, wait_until='networkidle', timeout=60000)
+                await asyncio.sleep(5)
+                
+                # Execute JavaScript to find video URLs
+                found_urls = await page.evaluate("""
+                () => {
+                    var urls = [];
+                    document.querySelectorAll('video').forEach(v => {
+                        if (v.src) urls.push(v.src);
+                        if (v.currentSrc) urls.push(v.currentSrc);
+                        v.querySelectorAll('source').forEach(s => {
+                            if (s.src) urls.push(s.src);
+                        });
+                    });
+                    return urls;
+                }
+                """)
+                
+                video_urls.extend(found_urls)
+                video_urls.extend(network_urls)
+                
+                print(f"[Playwright] Found {len(video_urls)} potential video URLs")
+                
+        except ImportError:
+            print("[Playwright] Playwright not installed, skipping")
+        except Exception as e:
+            print(f"[Playwright] Error: {e}")
+        finally:
+            if browser:
+                try:
+                    await browser.close()
+                except:
+                    pass
+        
+        return video_urls
+    
+    def decode_packed_js(self, packed_code):
+        """Decode JavaScript yang di-pack dengan eval(function(p,a,c,k,e,d)...)"""
+        try:
+            # Pattern untuk packed JavaScript
+            packed_pattern = r"eval\(function\(p,a,c,k,e,[rd]\).*?\.split\('\|'\)\)"
+            match = re.search(packed_pattern, packed_code, re.DOTALL)
+            
+            if not match:
+                return packed_code
+            
+            # Extract komponen packed code
+            payload_match = re.search(r"}\('(.+)',(\d+),(\d+),'([^']+)'", packed_code, re.DOTALL)
+            if not payload_match:
+                return packed_code
+            
+            payload = payload_match.group(1)
+            radix = int(payload_match.group(2))
+            count = int(payload_match.group(3))
+            keywords = payload_match.group(4).split('|')
+            
+            # Decode dengan mengganti placeholder
+            def replace_func(match):
+                word = match.group(0)
+                try:
+                    index = int(word, radix)
+                    if index < len(keywords) and keywords[index]:
+                        return keywords[index]
+                except:
+                    pass
+                return word
+            
+            decoded = re.sub(r'\b\w+\b', replace_func, payload)
+            return decoded
+        except Exception as e:
+            print(f"Error decoding packed JS: {e}")
+            return packed_code
+    
+    def extract_from_obfuscated_js(self, html, url):
+        """Ekstrak video URL dari JavaScript yang di-obfuscate"""
+        video_urls = []
+        
+        try:
+            # Pattern untuk berbagai jenis obfuscation
+            patterns = [
+                # Standard video URL patterns
+                r'(?:src|source|file|video_url|videoUrl|mp4|stream|url)["\']?\s*[:=]\s*["\']([^"\']+\.(?:mp4|m3u8|webm)[^"\']*)["\']',
+                r'(?:https?://[^\s"\'<>]+\.(?:mp4|m3u8|webm|mkv|avi)(?:\?[^\s"\'<>]*)?)',
+                
+                # HLS/M3U8 patterns
+                r'["\']([^"\']*\.m3u8[^"\']*)["\']',
+                r'source:\s*["\']([^"\']+)["\']',
+                
+                # Video hosting specific patterns
+                r'file:\s*["\']([^"\']+)["\']',
+                r'sources:\s*\[\s*\{[^}]*url:\s*["\']([^"\']+)["\']',
+                r'sources:\s*\[\s*\{[^}]*file:\s*["\']([^"\']+)["\']',
+                r'player\.src\s*\(\s*["\']([^"\']+)["\']',
+                r'player\.load\s*\(\s*["\']([^"\']+)["\']',
+                r'Playerjs\s*\(\s*\{[^}]*file:\s*["\']([^"\']+)["\']',
+                
+                # Base64 encoded URLs
+                r'atob\(["\']([A-Za-z0-9+/=]+)["\']',
+                
+                # JSON sources
+                r'"sources":\s*\[\s*\{\s*"file":\s*"([^"]+)"',
+                r'"src":\s*"([^"]+\.(?:mp4|m3u8|webm))"',
+                r'"url":\s*"([^"]+\.(?:mp4|m3u8|webm))"',
+                
+                # Common streaming site patterns
+                r'vidsrc["\']?\s*[:=]\s*["\']([^"\']+)["\']',
+                r'videoSrc["\']?\s*[:=]\s*["\']([^"\']+)["\']',
+                r'playUrl["\']?\s*[:=]\s*["\']([^"\']+)["\']',
+                r'streamUrl["\']?\s*[:=]\s*["\']([^"\']+)["\']',
+                r'downloadUrl["\']?\s*[:=]\s*["\']([^"\']+)["\']',
+                r'directUrl["\']?\s*[:=]\s*["\']([^"\']+)["\']',
+                
+                # Data attributes
+                r'data-src=["\']([^"\']+)["\']',
+                r'data-video=["\']([^"\']+)["\']',
+                r'data-url=["\']([^"\']+)["\']',
+                r'data-file=["\']([^"\']+)["\']',
+                
+                # Encoded/escaped URLs
+                r'\\x68\\x74\\x74\\x70[^"\']+',  # Hex encoded http
+                r'\\u0068\\u0074\\u0074\\u0070[^"\']+',  # Unicode encoded http
+            ]
+            
+            # Decode packed JavaScript first
+            decoded_html = self.decode_packed_js(html)
+            
+            for pattern in patterns:
+                matches = re.findall(pattern, decoded_html, re.IGNORECASE | re.DOTALL)
+                for match in matches:
+                    if match:
+                        # Try to decode base64 if it looks like base64
+                        if pattern == r'atob\(["\']([A-Za-z0-9+/=]+)["\']':
+                            try:
+                                import base64
+                                decoded = base64.b64decode(match).decode('utf-8')
+                                if decoded.startswith('http'):
+                                    video_urls.append(decoded)
+                            except:
+                                pass
+                        else:
+                            # Decode unicode/hex escapes
+                            try:
+                                decoded_url = match.encode().decode('unicode_escape')
+                                video_urls.append(decoded_url)
+                            except:
+                                video_urls.append(match)
+            
+            # Look for API endpoints that might return video URLs
+            api_patterns = [
+                r'(/api/[^"\']+)',
+                r'(/embed/[^"\']+)',
+                r'(/stream/[^"\']+)',
+                r'(/player/[^"\']+)',
+                r'(/video/[^"\']+)',
+                r'(/download/[^"\']+)',
+                r'(/get[^"\']*video[^"\']*)',
+            ]
+            
+            for pattern in api_patterns:
+                matches = re.findall(pattern, decoded_html, re.IGNORECASE)
+                for match in matches:
+                    parsed = urlparse(url)
+                    api_url = f"{parsed.scheme}://{parsed.netloc}{match}"
+                    video_urls.append(api_url)
+            
+        except Exception as e:
+            print(f"Error extracting from obfuscated JS: {e}")
+        
+        return video_urls
+    
+    async def try_api_extraction(self, url):
+        """Coba ekstrak video URL via API calls"""
+        video_urls = []
+        
+        try:
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'application/json, text/plain, */*',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Referer': url,
+                'Origin': urlparse(url).scheme + '://' + urlparse(url).netloc
+            }
+            
+            parsed = urlparse(url)
+            base_url = f"{parsed.scheme}://{parsed.netloc}"
+            
+            # Extract video ID from URL
+            video_id = None
+            id_patterns = [
+                r'/e/([a-zA-Z0-9]+)',
+                r'/v/([a-zA-Z0-9]+)',
+                r'/embed/([a-zA-Z0-9]+)',
+                r'/video/([a-zA-Z0-9]+)',
+                r'/watch/([a-zA-Z0-9]+)',
+                r'\?v=([a-zA-Z0-9]+)',
+                r'/([a-zA-Z0-9]{8,})',
+            ]
+            
+            for pattern in id_patterns:
+                match = re.search(pattern, url)
+                if match:
+                    video_id = match.group(1)
+                    break
+            
+            if video_id:
+                # Common API endpoints to try
+                api_endpoints = [
+                    f'{base_url}/api/source/{video_id}',
+                    f'{base_url}/api/video/{video_id}',
+                    f'{base_url}/api/stream/{video_id}',
+                    f'{base_url}/api/file/{video_id}',
+                    f'{base_url}/dl/{video_id}',
+                    f'{base_url}/download/{video_id}',
+                    f'{base_url}/get/{video_id}',
+                    f'{base_url}/source/{video_id}',
+                ]
+                
+                for endpoint in api_endpoints:
+                    try:
+                        resp = requests.get(endpoint, headers=headers, timeout=10)
+                        if resp.status_code == 200:
+                            # Try to parse as JSON
+                            try:
+                                data = resp.json()
+                                # Look for video URL in common response structures
+                                for key in ['url', 'file', 'src', 'source', 'video', 'stream', 'download', 'link']:
+                                    if key in data and isinstance(data[key], str):
+                                        video_urls.append(data[key])
+                                    elif key in data and isinstance(data[key], list):
+                                        for item in data[key]:
+                                            if isinstance(item, str):
+                                                video_urls.append(item)
+                                            elif isinstance(item, dict):
+                                                for subkey in ['url', 'file', 'src']:
+                                                    if subkey in item:
+                                                        video_urls.append(item[subkey])
+                            except:
+                                # Not JSON, check if direct URL
+                                if resp.text.startswith('http'):
+                                    video_urls.append(resp.text.strip())
+                    except:
+                        pass
+                
+                # POST request to common API endpoints
+                post_endpoints = [
+                    f'{base_url}/api/source/{video_id}',
+                    f'{base_url}/download',
+                    f'{base_url}/get-link',
+                ]
+                
+                for endpoint in post_endpoints:
+                    try:
+                        resp = requests.post(
+                            endpoint,
+                            headers=headers,
+                            data={'id': video_id, 'video_id': video_id},
+                            timeout=10
+                        )
+                        if resp.status_code == 200:
+                            try:
+                                data = resp.json()
+                                for key in ['url', 'file', 'src', 'source', 'data']:
+                                    if key in data:
+                                        if isinstance(data[key], str):
+                                            video_urls.append(data[key])
+                                        elif isinstance(data[key], list):
+                                            for item in data[key]:
+                                                if isinstance(item, dict) and 'file' in item:
+                                                    video_urls.append(item['file'])
+                            except:
+                                pass
+                    except:
+                        pass
+                        
+        except Exception as e:
+            print(f"Error in API extraction: {e}")
+        
+        return video_urls
+    
     async def extract_direct_video_url(self, url):
         """Ekstrak URL video langsung dari halaman streaming"""
         try:
@@ -553,11 +1050,20 @@ class SafeRobot:
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
                 'Accept-Language': 'en-US,en;q=0.5',
+                'Accept-Encoding': 'gzip, deflate',
                 'Connection': 'keep-alive',
-                'Referer': url
+                'Referer': url,
+                'Sec-Fetch-Dest': 'document',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'none',
+                'Sec-Fetch-User': '?1',
+                'Upgrade-Insecure-Requests': '1'
             }
             
-            response = requests.get(url, headers=headers, timeout=30, allow_redirects=True)
+            session = requests.Session()
+            
+            # Try to get the page with session to handle cookies
+            response = session.get(url, headers=headers, timeout=30, allow_redirects=True)
             html = response.text
             
             # Parse dengan BeautifulSoup
@@ -576,40 +1082,63 @@ class SafeRobot:
                     if source.get('src'):
                         video_urls.append(source.get('src'))
             
-            # 2. Cari di JavaScript untuk URL video
-            scripts = soup.find_all('script')
-            video_patterns = [
-                r'(?:src|source|file|video_url|videoUrl|mp4|stream)["\']?\s*[:=]\s*["\']([^"\']+\.(?:mp4|m3u8|webm)[^"\']*)["\']',
-                r'(?:https?://[^\s"\'<>]+\.(?:mp4|m3u8|webm)(?:\?[^\s"\'<>]*)?)',
-                r'data-src=["\']([^"\']+)["\']',
-                r'player\.src\(["\']([^"\']+)["\']',
-            ]
-            
-            for script in scripts:
-                script_text = script.string or ''
-                for pattern in video_patterns:
-                    matches = re.findall(pattern, script_text, re.IGNORECASE)
-                    video_urls.extend(matches)
+            # 2. Cari di JavaScript untuk URL video (advanced extraction)
+            video_urls.extend(self.extract_from_obfuscated_js(html, url))
             
             # 3. Cari iframe embed
             iframes = soup.find_all('iframe')
             for iframe in iframes:
                 iframe_src = iframe.get('src') or iframe.get('data-src')
-                if iframe_src and any(ext in iframe_src.lower() for ext in ['.mp4', '.m3u8', 'embed', 'player']):
-                    video_urls.append(iframe_src)
+                if iframe_src:
+                    # Handle relative URLs
+                    if iframe_src.startswith('//'):
+                        iframe_src = 'https:' + iframe_src
+                    elif iframe_src.startswith('/'):
+                        parsed = urlparse(url)
+                        iframe_src = f"{parsed.scheme}://{parsed.netloc}{iframe_src}"
+                    
+                    # Follow iframe and extract from there
+                    if 'embed' in iframe_src.lower() or 'player' in iframe_src.lower():
+                        try:
+                            iframe_resp = session.get(iframe_src, headers={**headers, 'Referer': url}, timeout=15)
+                            iframe_urls = self.extract_from_obfuscated_js(iframe_resp.text, iframe_src)
+                            video_urls.extend(iframe_urls)
+                        except:
+                            pass
+                    
+                    if any(ext in iframe_src.lower() for ext in ['.mp4', '.m3u8', 'stream']):
+                        video_urls.append(iframe_src)
             
             # 4. Cari link download
             download_links = soup.find_all('a', href=True)
             for link in download_links:
                 href = link.get('href', '')
                 text = link.get_text().lower()
-                if any(word in text for word in ['download', 'unduh', '720p', '1080p', '480p', 'mp4']):
+                class_attr = ' '.join(link.get('class', []))
+                
+                if any(word in text.lower() for word in ['download', 'unduh', '720p', '1080p', '480p', '360p', 'mp4', 'original']):
                     video_urls.append(href)
+                if any(word in class_attr.lower() for word in ['download', 'btn-download']):
+                    video_urls.append(href)
+            
+            # 5. Try API extraction
+            api_urls = await self.try_api_extraction(url)
+            video_urls.extend(api_urls)
+            
+            # 6. Look for redirect URLs in meta tags
+            meta_refresh = soup.find('meta', attrs={'http-equiv': 'refresh'})
+            if meta_refresh:
+                content = meta_refresh.get('content', '')
+                url_match = re.search(r'url=([^"\']+)', content, re.IGNORECASE)
+                if url_match:
+                    video_urls.append(url_match.group(1))
             
             # Bersihkan dan validasi URL
             cleaned_urls = []
             for video_url in video_urls:
-                if video_url:
+                if video_url and isinstance(video_url, str):
+                    video_url = video_url.strip()
+                    
                     # Handle relative URLs
                     if video_url.startswith('//'):
                         video_url = 'https:' + video_url
@@ -617,13 +1146,62 @@ class SafeRobot:
                         parsed = urlparse(url)
                         video_url = f"{parsed.scheme}://{parsed.netloc}{video_url}"
                     
-                    if video_url.startswith('http') and any(ext in video_url.lower() for ext in ['.mp4', '.m3u8', '.webm', 'download', 'stream']):
-                        cleaned_urls.append(video_url)
+                    # Validate URL
+                    if video_url.startswith('http'):
+                        # Check for video extensions or streaming indicators
+                        video_indicators = ['.mp4', '.m3u8', '.webm', '.mkv', '.avi', '.mov',
+                                           'download', 'stream', 'video', 'media', 'cdn',
+                                           '/dl/', '/get/', '/source/']
+                        
+                        if any(ind in video_url.lower() for ind in video_indicators):
+                            # Avoid tracking/ad URLs
+                            avoid = ['google', 'facebook', 'twitter', 'analytics', 'adsense', 
+                                    'doubleclick', 'pixel', 'tracking', '.js', '.css']
+                            if not any(avoid_word in video_url.lower() for avoid_word in avoid):
+                                cleaned_urls.append(video_url)
             
-            return list(set(cleaned_urls))  # Remove duplicates
+            # Remove duplicates while preserving order
+            seen = set()
+            unique_urls = []
+            for u in cleaned_urls:
+                if u not in seen:
+                    seen.add(u)
+                    unique_urls.append(u)
+            
+            print(f"Found {len(unique_urls)} potential video URLs from basic extraction")
+            
+            # If no URLs found, try Selenium or Playwright as fallback
+            if len(unique_urls) == 0:
+                print("No URLs found with basic extraction, trying browser automation...")
+                
+                # Try Playwright first (faster and more reliable)
+                try:
+                    playwright_urls = await self.extract_with_playwright(url)
+                    for u in playwright_urls:
+                        if u and isinstance(u, str) and u.startswith('http') and u not in seen:
+                            seen.add(u)
+                            unique_urls.append(u)
+                except Exception as e:
+                    print(f"Playwright extraction failed: {e}")
+                
+                # If still no URLs, try Selenium
+                if len(unique_urls) == 0:
+                    try:
+                        selenium_urls = await self.extract_with_selenium(url)
+                        for u in selenium_urls:
+                            if u and isinstance(u, str) and u.startswith('http') and u not in seen:
+                                seen.add(u)
+                                unique_urls.append(u)
+                    except Exception as e:
+                        print(f"Selenium extraction failed: {e}")
+            
+            print(f"Total: {len(unique_urls)} potential video URLs found")
+            return unique_urls
             
         except Exception as e:
             print(f"Error extracting video URL: {e}")
+            import traceback
+            traceback.print_exc()
             return []
     
     async def download_with_custom_extractor(self, url, format_type='video'):
@@ -632,23 +1210,26 @@ class SafeRobot:
             video_urls = await self.extract_direct_video_url(url)
             
             if not video_urls:
-                return {'success': False, 'error': 'Tidak dapat menemukan URL video'}
+                return {'success': False, 'error': 'Tidak dapat menemukan URL video. Platform ini mungkin memerlukan login atau memiliki proteksi anti-bot.'}
             
-            # Pilih URL terbaik (prefer MP4)
-            best_url = None
-            for v_url in video_urls:
-                if '.mp4' in v_url.lower():
-                    best_url = v_url
-                    break
+            print(f"Trying to download from {len(video_urls)} potential URLs")
             
-            if not best_url:
-                best_url = video_urls[0]
+            # Sort URLs by priority (MP4 first, then M3U8, then others)
+            def url_priority(u):
+                u_lower = u.lower()
+                if '.mp4' in u_lower:
+                    # Prefer higher quality
+                    if '1080' in u_lower: return 0
+                    if '720' in u_lower: return 1
+                    if '480' in u_lower: return 2
+                    return 3
+                elif '.m3u8' in u_lower:
+                    return 10
+                elif '.webm' in u_lower:
+                    return 5
+                return 20
             
-            # Download file
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Referer': url
-            }
+            video_urls.sort(key=url_priority)
             
             # Generate filename
             url_hash = hashlib.md5(url.encode()).hexdigest()[:8]
@@ -656,34 +1237,152 @@ class SafeRobot:
             
             if format_type == 'audio':
                 filename = f"{DOWNLOAD_PATH}audio_{timestamp}_{url_hash}.mp3"
+                temp_video = f"{DOWNLOAD_PATH}temp_{timestamp}_{url_hash}.mp4"
             else:
                 filename = f"{DOWNLOAD_PATH}video_{timestamp}_{url_hash}.mp4"
+                temp_video = filename
             
-            response = requests.get(best_url, headers=headers, stream=True, timeout=120)
-            response.raise_for_status()
-            
-            with open(filename, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
-            
-            # Jika audio, convert dengan ffmpeg
-            if format_type == 'audio':
-                video_file = filename.replace('.mp3', '_temp.mp4')
-                os.rename(filename, video_file)
-                
+            # Try each URL until one works
+            last_error = None
+            for video_url in video_urls[:5]:  # Try first 5 URLs
                 try:
-                    subprocess.run([
-                        'ffmpeg', '-i', video_file, '-vn', '-acodec', 'libmp3lame',
-                        '-ab', '192k', '-y', filename
-                    ], capture_output=True, timeout=300)
-                    os.remove(video_file)
+                    print(f"Trying URL: {video_url[:100]}...")
+                    
+                    headers = {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                        'Accept': '*/*',
+                        'Accept-Encoding': 'identity',
+                        'Accept-Language': 'en-US,en;q=0.9',
+                        'Referer': url,
+                        'Origin': urlparse(url).scheme + '://' + urlparse(url).netloc,
+                        'Range': 'bytes=0-'
+                    }
+                    
+                    # Check if it's M3U8 (HLS stream)
+                    if '.m3u8' in video_url.lower():
+                        # Use ffmpeg to download HLS stream
+                        try:
+                            print("Downloading HLS stream with ffmpeg...")
+                            result = subprocess.run([
+                                'ffmpeg', '-y',
+                                '-headers', f'Referer: {url}\r\nUser-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36\r\n',
+                                '-i', video_url,
+                                '-c', 'copy',
+                                '-bsf:a', 'aac_adtstoasc',
+                                temp_video
+                            ], capture_output=True, timeout=300)
+                            
+                            if os.path.exists(temp_video) and os.path.getsize(temp_video) > 10000:
+                                print("HLS download successful")
+                                break
+                            else:
+                                last_error = "HLS download produced empty file"
+                                if os.path.exists(temp_video):
+                                    os.remove(temp_video)
+                                continue
+                        except Exception as e:
+                            last_error = str(e)
+                            print(f"FFmpeg HLS download failed: {e}")
+                            continue
+                    
+                    # Regular HTTP download
+                    session = requests.Session()
+                    response = session.get(video_url, headers=headers, stream=True, timeout=120, allow_redirects=True)
+                    
+                    # Check content type
+                    content_type = response.headers.get('content-type', '').lower()
+                    content_length = int(response.headers.get('content-length', 0))
+                    
+                    print(f"Response: {response.status_code}, Content-Type: {content_type}, Size: {content_length}")
+                    
+                    # Skip if it's not a video
+                    if response.status_code != 200 and response.status_code != 206:
+                        last_error = f"HTTP {response.status_code}"
+                        continue
+                    
+                    if 'text/html' in content_type and content_length < 100000:
+                        last_error = "Response is HTML, not video"
+                        continue
+                    
+                    # Download the file
+                    downloaded_size = 0
+                    with open(temp_video, 'wb') as f:
+                        for chunk in response.iter_content(chunk_size=1024*1024):  # 1MB chunks
+                            if chunk:
+                                f.write(chunk)
+                                downloaded_size += len(chunk)
+                    
+                    # Verify file is valid
+                    if downloaded_size < 10000:  # Less than 10KB is probably an error page
+                        last_error = f"Downloaded file too small ({downloaded_size} bytes)"
+                        if os.path.exists(temp_video):
+                            os.remove(temp_video)
+                        continue
+                    
+                    print(f"Downloaded {downloaded_size} bytes successfully")
+                    
+                    # Verify it's a valid video file
+                    try:
+                        result = subprocess.run(
+                            ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1', temp_video],
+                            capture_output=True,
+                            timeout=30
+                        )
+                        if result.returncode != 0:
+                            # Try to fix with ffmpeg
+                            fixed_file = temp_video.replace('.mp4', '_fixed.mp4')
+                            subprocess.run(['ffmpeg', '-y', '-i', temp_video, '-c', 'copy', fixed_file], 
+                                         capture_output=True, timeout=120)
+                            if os.path.exists(fixed_file) and os.path.getsize(fixed_file) > 10000:
+                                os.remove(temp_video)
+                                os.rename(fixed_file, temp_video)
+                    except:
+                        pass  # ffprobe might not be available, continue anyway
+                    
+                    # File downloaded successfully
+                    break
+                    
+                except requests.exceptions.RequestException as e:
+                    last_error = str(e)
+                    print(f"Download failed: {e}")
+                    continue
                 except Exception as e:
-                    os.rename(video_file, filename)
-                    print(f"FFmpeg conversion failed: {e}")
+                    last_error = str(e)
+                    print(f"Error: {e}")
+                    continue
             
-            # Extract title dari URL
-            title = url.split('/')[-1].split('?')[0] or 'Downloaded Video'
+            # Check if we got a valid file
+            if not os.path.exists(temp_video) or os.path.getsize(temp_video) < 10000:
+                return {'success': False, 'error': last_error or 'Gagal mendownload video dari semua sumber yang ditemukan'}
+            
+            # Convert to audio if needed
+            if format_type == 'audio':
+                try:
+                    print("Converting to audio...")
+                    result = subprocess.run([
+                        'ffmpeg', '-y', '-i', temp_video, 
+                        '-vn', '-acodec', 'libmp3lame',
+                        '-ab', '192k', filename
+                    ], capture_output=True, timeout=300)
+                    
+                    if os.path.exists(filename) and os.path.getsize(filename) > 1000:
+                        os.remove(temp_video)
+                    else:
+                        # If audio conversion failed, rename video to mp3 extension
+                        os.rename(temp_video, filename)
+                        print("Audio conversion failed, using original file")
+                except Exception as e:
+                    print(f"FFmpeg conversion failed: {e}")
+                    if os.path.exists(temp_video):
+                        os.rename(temp_video, filename)
+            
+            # Extract title from URL
+            path_parts = urlparse(url).path.split('/')
+            title = 'Downloaded Video'
+            for part in reversed(path_parts):
+                if part and len(part) > 3:
+                    title = part.split('.')[0].split('?')[0]
+                    break
             
             return {
                 'success': True,
@@ -693,23 +1392,61 @@ class SafeRobot:
             }
             
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             return {'success': False, 'error': str(e)}
     
     async def download_media(self, url, format_type='video'):
         """Download media dari berbagai platform"""
         platform = self.detect_platform(url)
+        is_streaming = self.is_streaming_platform(platform)
         
+        print(f"[Download] Platform: {platform}, Is Streaming: {is_streaming}, Format: {format_type}")
+        
+        # Untuk streaming platforms, langsung gunakan custom extractor karena yt-dlp biasanya gagal
+        if is_streaming and platform not in ['youtube', 'twitter', 'instagram', 'tiktok', 'facebook']:
+            print(f"[Download] Using custom extractor for streaming platform: {platform}")
+            result = await self.download_with_custom_extractor(url, format_type)
+            
+            # Jika custom extractor gagal, coba yt-dlp sebagai fallback
+            if not result['success']:
+                print(f"[Download] Custom extractor failed, trying yt-dlp as fallback...")
+                try:
+                    yt_result = await self._download_with_ytdlp(url, format_type, platform)
+                    if yt_result['success']:
+                        return yt_result
+                except Exception as e:
+                    print(f"[Download] yt-dlp fallback also failed: {e}")
+            
+            return result
+        
+        # Untuk social media platforms, gunakan yt-dlp terlebih dahulu
         try:
-            # Untuk streaming platforms, coba yt-dlp dulu, jika gagal gunakan custom extractor
+            result = await self._download_with_ytdlp(url, format_type, platform)
+            if result['success']:
+                return result
+        except Exception as yt_error:
+            print(f"[Download] yt-dlp failed for {platform}: {yt_error}")
+        
+        # Fallback ke custom extractor jika yt-dlp gagal
+        print(f"[Download] Falling back to custom extractor...")
+        return await self.download_with_custom_extractor(url, format_type)
+    
+    async def _download_with_ytdlp(self, url, format_type, platform):
+        """Download menggunakan yt-dlp"""
+        try:
             ydl_opts = {
                 'outtmpl': f'{DOWNLOAD_PATH}%(title).100s_%(id)s.%(ext)s',
                 'quiet': True,
                 'no_warnings': True,
                 'socket_timeout': 60,
-                'retries': 3,
-                'fragment_retries': 3,
+                'retries': 5,
+                'fragment_retries': 5,
+                'file_access_retries': 5,
                 'http_headers': {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.5',
                 },
                 'extractor_args': {
                     'youtube': {
@@ -724,6 +1461,8 @@ class SafeRobot:
                     'noplaylist': True,
                     'geo_bypass': True,
                     'nocheckcertificate': True,
+                    'allow_unplayable_formats': True,
+                    'extractor_retries': 3,
                 })
             
             if format_type == 'audio':
@@ -747,49 +1486,57 @@ class SafeRobot:
                     'format': 'best[filesize<50M]/best[height<=720]/best',
                 })
             
-            try:
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(url, download=True)
-                    
-                    if format_type == 'audio':
-                        filename = ydl.prepare_filename(info).rsplit('.', 1)[0] + '.mp3'
-                    elif format_type == 'photo':
-                        base_filename = ydl.prepare_filename(info)
-                        possible_extensions = ['.jpg', '.jpeg', '.png', '.webp']
-                        filename = None
-                        
-                        for ext in possible_extensions:
-                            test_file = base_filename.rsplit('.', 1)[0] + ext
-                            if os.path.exists(test_file):
-                                filename = test_file
-                                break
-                        
-                        if not filename:
-                            filename = base_filename
-                    else:
-                        filename = ydl.prepare_filename(info)
-                    
-                    return {
-                        'success': True,
-                        'filepath': filename,
-                        'title': info.get('title', 'Unknown'),
-                        'duration': info.get('duration', 0)
-                    }
-                    
-            except Exception as yt_error:
-                print(f"yt-dlp failed for {platform}: {yt_error}")
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
                 
-                # Jika yt-dlp gagal untuk streaming platform, coba custom extractor
-                if self.is_streaming_platform(platform):
-                    print("Trying custom extractor...")
-                    return await self.download_with_custom_extractor(url, format_type)
+                if info is None:
+                    return {'success': False, 'error': 'No video info extracted'}
+                
+                if format_type == 'audio':
+                    filename = ydl.prepare_filename(info).rsplit('.', 1)[0] + '.mp3'
+                elif format_type == 'photo':
+                    base_filename = ydl.prepare_filename(info)
+                    possible_extensions = ['.jpg', '.jpeg', '.png', '.webp']
+                    filename = None
+                    
+                    for ext in possible_extensions:
+                        test_file = base_filename.rsplit('.', 1)[0] + ext
+                        if os.path.exists(test_file):
+                            filename = test_file
+                            break
+                    
+                    if not filename:
+                        filename = base_filename
                 else:
-                    raise yt_error
-        
+                    filename = ydl.prepare_filename(info)
+                
+                # Verify file exists
+                if not os.path.exists(filename):
+                    # Try to find the actual downloaded file
+                    base = filename.rsplit('.', 1)[0]
+                    for ext in ['.mp4', '.webm', '.mkv', '.mp3', '.m4a']:
+                        if os.path.exists(base + ext):
+                            filename = base + ext
+                            break
+                
+                if not os.path.exists(filename):
+                    return {'success': False, 'error': 'Downloaded file not found'}
+                
+                return {
+                    'success': True,
+                    'filepath': filename,
+                    'title': info.get('title', 'Unknown'),
+                    'duration': info.get('duration', 0)
+                }
+                
         except Exception as e:
+            error_msg = str(e)
+            # Truncate long error messages
+            if len(error_msg) > 300:
+                error_msg = error_msg[:300] + "..."
             return {
                 'success': False,
-                'error': str(e)
+                'error': error_msg
             }
 
 bot = SafeRobot()
