@@ -1,0 +1,18 @@
+# SafeRobot - Multi-Platform Video Downloader Bot
+# Python Dependencies
+
+# Telegram Bot Framework
+python-telegram-bot[all]>=20.0
+
+# YouTube/Video Downloader
+yt-dlp>=2024.1.1
+
+# Web Scraping untuk Streaming Platforms
+beautifulsoup4>=4.12.0
+lxml>=5.0.0
+
+# HTTP Requests
+requests>=2.31.0
+
+# Optional: Untuk performa lebih baik
+aiohttp>=3.9.0
