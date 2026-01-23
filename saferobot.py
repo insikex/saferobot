@@ -2,11 +2,15 @@ import os
 import re
 import asyncio
 import json
+import requests
+import subprocess
 from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 import yt_dlp
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs, urljoin
+from bs4 import BeautifulSoup
+import hashlib
 
 # ============================================
 # KONFIGURASI
@@ -15,6 +19,7 @@ BOT_TOKEN = "7389890441:AAGkXEXHedGHYrmXq3Vp5RlT8Y5_kBChL5Q"
 OWNER_ID = 6683929810  # GANTI DENGAN USER ID TELEGRAM ANDA
 DOWNLOAD_PATH = "./downloads/"
 DATABASE_PATH = "./users_database.json"
+MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB limit Telegram
 
 if not os.path.exists(DOWNLOAD_PATH):
     os.makedirs(DOWNLOAD_PATH)
@@ -150,6 +155,8 @@ LANGUAGES = {
 🤖 *Selamat datang di SafeRobot!*
 
 Bot downloader serba bisa untuk:
+
+📱 *SOSIAL MEDIA:*
 ✅ TikTok
 ✅ Instagram (Post, Reels, Stories)
 ✅ Twitter/X
@@ -157,21 +164,34 @@ Bot downloader serba bisa untuk:
 ✅ Facebook
 ✅ Pinterest
 
+🎬 *STREAMING/HOSTING VIDEO:*
+✅ DoodStream (dood.to, dood-hd.com, dll)
+✅ TeraBox (terabox.com, 1024terabox.com)
+✅ Videy (vidoy.com, videypro.live, dll)
+✅ Videq (videq.io, videq.co, dll)
+✅ LuluStream (lulustream.com, lulu.st)
+✅ VidCloud, StreamTape, MixDrop
+✅ Dan 50+ platform streaming lainnya!
+
 🔥 *Cara Penggunaan:*
 Cukup kirim link dari platform yang didukung, pilih format, dan file akan dikirim ke chat Anda!
+
+Gunakan /platforms untuk melihat daftar lengkap platform.
 
 Gunakan tombol menu di bawah untuk navigasi 👇
         """,
         'about': """
 ℹ️ *Tentang SafeRobot*
 
-@SafeRobot adalah bot Telegram yang memudahkan Anda mendownload konten dari berbagai platform media sosial dengan cepat dan mudah.
+@SafeRobot adalah bot Telegram yang memudahkan Anda mendownload konten dari berbagai platform media sosial dan streaming video dengan cepat dan mudah.
 
 *Fitur Utama:*
 ⚡ Download cepat
-🎯 Multi-platform
+🎯 Multi-platform (60+ platform)
 🔒 Aman & privat
 📱 Mudah digunakan
+🎬 Support streaming platforms
+📥 Download langsung ke Telegram
 
 Terima kasih telah menggunakan @SafeRobot! 🙏
         """,
@@ -179,19 +199,24 @@ Terima kasih telah menggunakan @SafeRobot! 🙏
         'unsupported': """❌ Platform tidak didukung!
 
 Platform yang didukung:
-• TikTok
-• Instagram
-• Twitter/X
-• YouTube
-• Facebook
-• Pinterest""",
+📱 *Sosial Media:*
+• TikTok, Instagram, Twitter/X
+• YouTube, Facebook, Pinterest
+
+🎬 *Streaming Video:*
+• DoodStream, TeraBox, Videy
+• Videq, LuluStream, VidCloud
+• Dan banyak lainnya...
+
+Ketik /platforms untuk daftar lengkap.""",
         'detected': "✅ Link dari *{}* terdeteksi!\n\nPilih format download:",
+        'detected_streaming': "🎬 Link streaming dari *{}* terdeteksi!\n\n⚠️ Platform streaming mungkin memerlukan waktu lebih lama.\n\nPilih format download:",
         'downloading': "⏳ Sedang mendownload {}...\nMohon tunggu sebentar...",
+        'downloading_streaming': "⏳ Mengekstrak video dari streaming...\n\n📡 Platform: *{}*\n⌛ Proses ini mungkin memakan waktu 1-2 menit.\n\nMohon tunggu...",
         'sending': "📤 Mengirim file...",
-        'video_caption': "🎥 *{}*\n\n🔥 Downloaded by SafeRobot",
-        'audio_caption': "🎵 *{}*\n\n🔥 Downloaded by SafeRobot",
-        'photo_caption': "📷 *{}*\n\n🔥 Downloaded by SafeRobot",
-        'photo_caption': "📷 *{}*\n\n🔥 Downloaded by SafeRobot",
+        'video_caption': "🎥 *{}*\n\n🔥 Downloaded by @SafeRobot",
+        'audio_caption': "🎵 *{}*\n\n🔥 Downloaded by @SafeRobot",
+        'photo_caption': "📷 *{}*\n\n🔥 Downloaded by @SafeRobot",
         'download_failed': """❌ Download gagal!
 
 Error: {}
@@ -199,6 +224,7 @@ Error: {}
 Tips:
 • Pastikan link dapat diakses
 • Coba link lain
+• Beberapa streaming platform memiliki proteksi
 • Hubungi admin jika masalah berlanjut""",
         'error_occurred': """❌ Terjadi kesalahan!
 
@@ -206,20 +232,63 @@ Error: {}
 
 Silakan coba lagi atau hubungi admin.""",
         'video_button': "🎥 Video (MP4)",
+        'video_hd_button': "🎥 Video HD",
+        'video_sd_button': "📹 Video SD",
         'audio_button': "🎵 Audio (MP3)",
-        'photo_button': "📷 Photo/Image",
         'photo_button': "📷 Foto/Gambar",
+        'direct_download_button': "⬇️ Download Langsung",
         'menu_about': "ℹ️ Tentang",
+        'menu_platforms': "📋 Platform",
         'menu_start': "🏠 Menu Utama",
         'video': 'video',
         'audio': 'audio',
-        'send_link': "🔎 Kirim link dari platform yang didukung untuk mulai download!"
+        'send_link': "🔎 Kirim link dari platform yang didukung untuk mulai download!",
+        'platforms_list': """📋 *DAFTAR PLATFORM YANG DIDUKUNG*
+
+📱 *SOSIAL MEDIA:*
+├ TikTok (tiktok.com, vm.tiktok.com)
+├ Instagram (instagram.com)
+├ Twitter/X (twitter.com, x.com)
+├ YouTube (youtube.com, youtu.be)
+├ Facebook (facebook.com, fb.watch)
+└ Pinterest (pinterest.com, pin.it)
+
+🎬 *STREAMING PLATFORMS:*
+
+*DoodStream Family:*
+├ doodstream.com, dood.to, dood.watch
+├ dood-hd.com, dood.wf, dood.cx
+└ dood.sh, dood.so, dood.ws
+
+*TeraBox Family:*
+├ terabox.com, 1024terabox.com
+├ teraboxapp.com, 4funbox.com
+└ mirrobox.com, nephobox.com
+
+*Videy/Videq Family:*
+├ vidoy.com, videypro.live, videy.la
+├ videq.io, videq.co, videq.me
+├ vide-q.com, vide0.me, vide6.com
+└ Dan 40+ domain lainnya...
+
+*LuluStream:*
+├ lulustream.com, lulu.st
+└ lixstream.com
+
+*Lainnya:*
+├ VidCloud, StreamTape, MixDrop
+├ Upstream, MP4Upload, Vidoza
+└ Dan masih banyak lagi!
+
+💡 Kirim link untuk mulai download!"""
     },
     'en': {
         'welcome': """
 🤖 *Welcome to SafeRobot!*
 
 All-in-one downloader bot for:
+
+📱 *SOCIAL MEDIA:*
 ✅ TikTok
 ✅ Instagram (Post, Reels, Stories)
 ✅ Twitter/X
@@ -227,21 +296,34 @@ All-in-one downloader bot for:
 ✅ Facebook
 ✅ Pinterest
 
+🎬 *VIDEO STREAMING/HOSTING:*
+✅ DoodStream (dood.to, dood-hd.com, etc)
+✅ TeraBox (terabox.com, 1024terabox.com)
+✅ Videy (vidoy.com, videypro.live, etc)
+✅ Videq (videq.io, videq.co, etc)
+✅ LuluStream (lulustream.com, lulu.st)
+✅ VidCloud, StreamTape, MixDrop
+✅ And 50+ more streaming platforms!
+
 🔥 *How to Use:*
 Just send a link from supported platforms, choose format, and the file will be sent to your chat!
+
+Use /platforms to see full platform list.
 
 Use the menu buttons below for navigation 👇
         """,
         'about': """
 ℹ️ *About SafeRobot*
 
-@SafeRobot is a Telegram bot that makes it easy to download content from various social media platforms quickly and easily.
+@SafeRobot is a Telegram bot that makes it easy to download content from various social media and video streaming platforms quickly and easily.
 
 *Main Features:*
 ⚡ Fast download
-🎯 Multi-platform
+🎯 Multi-platform (60+ platforms)
 🔒 Safe & private
 📱 Easy to use
+🎬 Streaming platform support
+📥 Direct download to Telegram
 
 Thank you for using @SafeRobot! 🙏
         """,
@@ -249,17 +331,24 @@ Thank you for using @SafeRobot! 🙏
         'unsupported': """❌ Platform not supported!
 
 Supported platforms:
-• TikTok
-• Instagram
-• Twitter/X
-• YouTube
-• Facebook
-• Pinterest""",
+📱 *Social Media:*
+• TikTok, Instagram, Twitter/X
+• YouTube, Facebook, Pinterest
+
+🎬 *Video Streaming:*
+• DoodStream, TeraBox, Videy
+• Videq, LuluStream, VidCloud
+• And many more...
+
+Type /platforms for full list.""",
         'detected': "✅ Link from *{}* detected!\n\nChoose download format:",
+        'detected_streaming': "🎬 Streaming link from *{}* detected!\n\n⚠️ Streaming platforms may take longer to process.\n\nChoose download format:",
         'downloading': "⏳ Downloading {}...\nPlease wait...",
+        'downloading_streaming': "⏳ Extracting video from streaming...\n\n📡 Platform: *{}*\n⌛ This process may take 1-2 minutes.\n\nPlease wait...",
         'sending': "📤 Sending file...",
-        'video_caption': "🎥 *{}*\n\n🔥 Downloaded by SafeRobot",
-        'audio_caption': "🎵 *{}*\n\n🔥 Downloaded by SafeRobot",
+        'video_caption': "🎥 *{}*\n\n🔥 Downloaded by @SafeRobot",
+        'audio_caption': "🎵 *{}*\n\n🔥 Downloaded by @SafeRobot",
+        'photo_caption': "📷 *{}*\n\n🔥 Downloaded by @SafeRobot",
         'download_failed': """❌ Download failed!
 
 Error: {}
@@ -267,6 +356,7 @@ Error: {}
 Tips:
 • Make sure the link is accessible
 • Try another link
+• Some streaming platforms have protection
 • Contact admin if problem persists""",
         'error_occurred': """❌ An error occurred!
 
@@ -274,12 +364,55 @@ Error: {}
 
 Please try again or contact admin.""",
         'video_button': "🎥 Video (MP4)",
+        'video_hd_button': "🎥 Video HD",
+        'video_sd_button': "📹 Video SD",
         'audio_button': "🎵 Audio (MP3)",
+        'photo_button': "📷 Photo/Image",
+        'direct_download_button': "⬇️ Direct Download",
         'menu_about': "ℹ️ About",
+        'menu_platforms': "📋 Platforms",
         'menu_start': "🏠 Main Menu",
         'video': 'video',
         'audio': 'audio',
-        'send_link': "🔎 Send a link from supported platforms to start downloading!"
+        'send_link': "🔎 Send a link from supported platforms to start downloading!",
+        'platforms_list': """📋 *SUPPORTED PLATFORMS LIST*
+
+📱 *SOCIAL MEDIA:*
+├ TikTok (tiktok.com, vm.tiktok.com)
+├ Instagram (instagram.com)
+├ Twitter/X (twitter.com, x.com)
+├ YouTube (youtube.com, youtu.be)
+├ Facebook (facebook.com, fb.watch)
+└ Pinterest (pinterest.com, pin.it)
+
+🎬 *STREAMING PLATFORMS:*
+
+*DoodStream Family:*
+├ doodstream.com, dood.to, dood.watch
+├ dood-hd.com, dood.wf, dood.cx
+└ dood.sh, dood.so, dood.ws
+
+*TeraBox Family:*
+├ terabox.com, 1024terabox.com
+├ teraboxapp.com, 4funbox.com
+└ mirrobox.com, nephobox.com
+
+*Videy/Videq Family:*
+├ vidoy.com, videypro.live, videy.la
+├ videq.io, videq.co, videq.me
+├ vide-q.com, vide0.me, vide6.com
+└ And 40+ more domains...
+
+*LuluStream:*
+├ lulustream.com, lulu.st
+└ lixstream.com
+
+*Others:*
+├ VidCloud, StreamTape, MixDrop
+├ Upstream, MP4Upload, Vidoza
+└ And many more!
+
+💡 Send a link to start downloading!"""
     }
 }
 
@@ -302,7 +435,10 @@ def get_main_keyboard(update: Update):
     """Buat keyboard menu utama"""
     lang = get_user_language(update)
     keyboard = [
-        [KeyboardButton(LANGUAGES[lang]['menu_about'])]
+        [
+            KeyboardButton(LANGUAGES[lang]['menu_platforms']),
+            KeyboardButton(LANGUAGES[lang]['menu_about'])
+        ]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
@@ -315,7 +451,8 @@ def is_owner(user_id: int) -> bool:
 # ============================================
 class SafeRobot:
     def __init__(self):
-        self.supported_platforms = {
+        # Platform sosial media utama
+        self.social_platforms = {
             'tiktok': ['tiktok.com', 'vm.tiktok.com', 'vt.tiktok.com'],
             'instagram': ['instagram.com', 'instagr.am'],
             'twitter': ['twitter.com', 'x.com', 't.co'],
@@ -323,23 +460,271 @@ class SafeRobot:
             'facebook': ['facebook.com', 'fb.watch', 'fb.com'],
             'pinterest': ['pinterest.com', 'pin.it']
         }
+        
+        # Platform streaming/hosting video yang didukung
+        self.streaming_platforms = {
+            'doodstream': [
+                'doodstream.com', 'dood.to', 'dood.watch', 'dood.pm', 
+                'dood.wf', 'dood.cx', 'dood.sh', 'dood.so', 
+                'dood.ws', 'dood.yt', 'dood.re', 'dood-hd.com',
+                'dood.la', 'ds2play.com', 'd0o0d.com', 'do0od.com'
+            ],
+            'terabox': [
+                'terabox.com', '1024terabox.com', 'teraboxapp.com',
+                'terabox.fun', 'terabox.link', '4funbox.com',
+                'mirrobox.com', 'nephobox.com', '1024tera.com'
+            ],
+            'videy': [
+                'vidoy.com', 'vidoy.cam', 'videypro.live', 'videyaio.com',
+                'videy.co', 'videy.la', 'vide-q.com', 'vide0.me',
+                'vide6.com', 'videw.online', 'vidqy.co', 'vidbre.org'
+            ],
+            'videq': [
+                'videq.io', 'videq.pw', 'videqs.com', 'videq.info',
+                'videq.tel', 'videq.wtf', 'videq.app', 'videq.video',
+                'videq.my', 'videq.boo', 'videq.cloud', 'videq.net',
+                'videq.co', 'videq.me', 'videq.org', 'videq.pro',
+                'videq.xyz', 'cdnvideq.net', 'avdeq.ink'
+            ],
+            'lulu': [
+                'lulustream.com', 'lulu.st', 'lixstream.com'
+            ],
+            'twimg': [
+                'videotwimg.app', 'video.twlmg.org', 'cdn.twlmg.org',
+                'twlmg.org', 'tvidey.tv', 'cdn.tvidey.tv', 
+                'tvimg.net', 'video.tvimg.net'
+            ],
+            'vidcloud': [
+                'vidcloudmv.org', 'vidcloud.co', 'vidcloud9.com'
+            ],
+            'vidpy': [
+                'cdn.vidpy.co', 'cdn.vidpy.cc', 'vidpy.co', 'vidpy.cc'
+            ],
+            'other_streaming': [
+                'upl.ad', 'vide.cx', 'vid.boats', 'vid.promo',
+                'video.twing.plus', 'myvidplay.com', 'streamtape.com',
+                'mixdrop.to', 'mixdrop.co', 'upstream.to', 'mp4upload.com',
+                'streamlare.com', 'fembed.com', 'femax20.com', 'fcdn.stream',
+                'embedsito.com', 'embedstream.me', 'vidoza.net', 'vidlox.me'
+            ]
+        }
+        
+        # Gabungkan semua platform
+        self.supported_platforms = {**self.social_platforms}
+        for platform, domains in self.streaming_platforms.items():
+            self.supported_platforms[platform] = domains
     
     def detect_platform(self, url):
         """Deteksi platform dari URL"""
-        domain = urlparse(url).netloc.lower()
-        for platform, domains in self.supported_platforms.items():
+        domain = urlparse(url).netloc.lower().replace('www.', '')
+        
+        # Cek sosial media dulu
+        for platform, domains in self.social_platforms.items():
             if any(d in domain for d in domains):
                 return platform
+        
+        # Cek streaming platforms
+        for platform, domains in self.streaming_platforms.items():
+            if any(d in domain for d in domains):
+                return platform
+        
+        # Jika tidak dikenali tapi masih URL valid, coba sebagai generic
+        if domain:
+            return 'generic'
+        
         return None
+    
+    def is_streaming_platform(self, platform):
+        """Cek apakah platform adalah streaming platform"""
+        return platform in self.streaming_platforms or platform == 'generic'
+    
+    def get_platform_category(self, platform):
+        """Dapatkan kategori platform"""
+        if platform in self.social_platforms:
+            return 'social'
+        elif platform in self.streaming_platforms or platform == 'generic':
+            return 'streaming'
+        return 'unknown'
+    
+    async def extract_direct_video_url(self, url):
+        """Ekstrak URL video langsung dari halaman streaming"""
+        try:
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+                'Connection': 'keep-alive',
+                'Referer': url
+            }
+            
+            response = requests.get(url, headers=headers, timeout=30, allow_redirects=True)
+            html = response.text
+            
+            # Parse dengan BeautifulSoup
+            soup = BeautifulSoup(html, 'html.parser')
+            
+            # Cari video URL dari berbagai sumber
+            video_urls = []
+            
+            # 1. Cari tag video langsung
+            video_tags = soup.find_all('video')
+            for video in video_tags:
+                if video.get('src'):
+                    video_urls.append(video.get('src'))
+                sources = video.find_all('source')
+                for source in sources:
+                    if source.get('src'):
+                        video_urls.append(source.get('src'))
+            
+            # 2. Cari di JavaScript untuk URL video
+            scripts = soup.find_all('script')
+            video_patterns = [
+                r'(?:src|source|file|video_url|videoUrl|mp4|stream)["\']?\s*[:=]\s*["\']([^"\']+\.(?:mp4|m3u8|webm)[^"\']*)["\']',
+                r'(?:https?://[^\s"\'<>]+\.(?:mp4|m3u8|webm)(?:\?[^\s"\'<>]*)?)',
+                r'data-src=["\']([^"\']+)["\']',
+                r'player\.src\(["\']([^"\']+)["\']',
+            ]
+            
+            for script in scripts:
+                script_text = script.string or ''
+                for pattern in video_patterns:
+                    matches = re.findall(pattern, script_text, re.IGNORECASE)
+                    video_urls.extend(matches)
+            
+            # 3. Cari iframe embed
+            iframes = soup.find_all('iframe')
+            for iframe in iframes:
+                iframe_src = iframe.get('src') or iframe.get('data-src')
+                if iframe_src and any(ext in iframe_src.lower() for ext in ['.mp4', '.m3u8', 'embed', 'player']):
+                    video_urls.append(iframe_src)
+            
+            # 4. Cari link download
+            download_links = soup.find_all('a', href=True)
+            for link in download_links:
+                href = link.get('href', '')
+                text = link.get_text().lower()
+                if any(word in text for word in ['download', 'unduh', '720p', '1080p', '480p', 'mp4']):
+                    video_urls.append(href)
+            
+            # Bersihkan dan validasi URL
+            cleaned_urls = []
+            for video_url in video_urls:
+                if video_url:
+                    # Handle relative URLs
+                    if video_url.startswith('//'):
+                        video_url = 'https:' + video_url
+                    elif video_url.startswith('/'):
+                        parsed = urlparse(url)
+                        video_url = f"{parsed.scheme}://{parsed.netloc}{video_url}"
+                    
+                    if video_url.startswith('http') and any(ext in video_url.lower() for ext in ['.mp4', '.m3u8', '.webm', 'download', 'stream']):
+                        cleaned_urls.append(video_url)
+            
+            return list(set(cleaned_urls))  # Remove duplicates
+            
+        except Exception as e:
+            print(f"Error extracting video URL: {e}")
+            return []
+    
+    async def download_with_custom_extractor(self, url, format_type='video'):
+        """Download menggunakan custom extractor untuk platform yang tidak didukung yt-dlp"""
+        try:
+            video_urls = await self.extract_direct_video_url(url)
+            
+            if not video_urls:
+                return {'success': False, 'error': 'Tidak dapat menemukan URL video'}
+            
+            # Pilih URL terbaik (prefer MP4)
+            best_url = None
+            for v_url in video_urls:
+                if '.mp4' in v_url.lower():
+                    best_url = v_url
+                    break
+            
+            if not best_url:
+                best_url = video_urls[0]
+            
+            # Download file
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Referer': url
+            }
+            
+            # Generate filename
+            url_hash = hashlib.md5(url.encode()).hexdigest()[:8]
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            
+            if format_type == 'audio':
+                filename = f"{DOWNLOAD_PATH}audio_{timestamp}_{url_hash}.mp3"
+            else:
+                filename = f"{DOWNLOAD_PATH}video_{timestamp}_{url_hash}.mp4"
+            
+            response = requests.get(best_url, headers=headers, stream=True, timeout=120)
+            response.raise_for_status()
+            
+            with open(filename, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+            
+            # Jika audio, convert dengan ffmpeg
+            if format_type == 'audio':
+                video_file = filename.replace('.mp3', '_temp.mp4')
+                os.rename(filename, video_file)
+                
+                try:
+                    subprocess.run([
+                        'ffmpeg', '-i', video_file, '-vn', '-acodec', 'libmp3lame',
+                        '-ab', '192k', '-y', filename
+                    ], capture_output=True, timeout=300)
+                    os.remove(video_file)
+                except Exception as e:
+                    os.rename(video_file, filename)
+                    print(f"FFmpeg conversion failed: {e}")
+            
+            # Extract title dari URL
+            title = url.split('/')[-1].split('?')[0] or 'Downloaded Video'
+            
+            return {
+                'success': True,
+                'filepath': filename,
+                'title': title,
+                'duration': 0
+            }
+            
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
     
     async def download_media(self, url, format_type='video'):
         """Download media dari berbagai platform"""
+        platform = self.detect_platform(url)
+        
         try:
+            # Untuk streaming platforms, coba yt-dlp dulu, jika gagal gunakan custom extractor
             ydl_opts = {
-                'outtmpl': f'{DOWNLOAD_PATH}%(title)s.%(ext)s',
+                'outtmpl': f'{DOWNLOAD_PATH}%(title).100s_%(id)s.%(ext)s',
                 'quiet': True,
                 'no_warnings': True,
+                'socket_timeout': 60,
+                'retries': 3,
+                'fragment_retries': 3,
+                'http_headers': {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                },
+                'extractor_args': {
+                    'youtube': {
+                        'player_client': ['android', 'web']
+                    }
+                }
             }
+            
+            # Tambahkan opsi khusus untuk streaming platforms
+            if self.is_streaming_platform(platform):
+                ydl_opts.update({
+                    'noplaylist': True,
+                    'geo_bypass': True,
+                    'nocheckcertificate': True,
+                })
             
             if format_type == 'audio':
                 ydl_opts.update({
@@ -351,48 +736,55 @@ class SafeRobot:
                     }],
                 })
             elif format_type == 'photo':
-                # Untuk foto, ambil thumbnail terbaik atau gambar asli
                 ydl_opts.update({
                     'format': 'best',
                     'writethumbnail': True,
                     'skip_download': False,
                 })
             else:
+                # Untuk video, prioritaskan format yang bagus tapi tidak terlalu besar
                 ydl_opts.update({
-                    'format': 'best[ext=mp4]/best',
+                    'format': 'best[filesize<50M]/best[height<=720]/best',
                 })
             
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=True)
+                    
+                    if format_type == 'audio':
+                        filename = ydl.prepare_filename(info).rsplit('.', 1)[0] + '.mp3'
+                    elif format_type == 'photo':
+                        base_filename = ydl.prepare_filename(info)
+                        possible_extensions = ['.jpg', '.jpeg', '.png', '.webp']
+                        filename = None
+                        
+                        for ext in possible_extensions:
+                            test_file = base_filename.rsplit('.', 1)[0] + ext
+                            if os.path.exists(test_file):
+                                filename = test_file
+                                break
+                        
+                        if not filename:
+                            filename = base_filename
+                    else:
+                        filename = ydl.prepare_filename(info)
+                    
+                    return {
+                        'success': True,
+                        'filepath': filename,
+                        'title': info.get('title', 'Unknown'),
+                        'duration': info.get('duration', 0)
+                    }
+                    
+            except Exception as yt_error:
+                print(f"yt-dlp failed for {platform}: {yt_error}")
                 
-                if format_type == 'audio':
-                    filename = ydl.prepare_filename(info).rsplit('.', 1)[0] + '.mp3'
-                elif format_type == 'photo':
-                    # Cari file gambar yang didownload
-                    base_filename = ydl.prepare_filename(info)
-                    
-                    # Cek berbagai ekstensi gambar
-                    possible_extensions = ['.jpg', '.jpeg', '.png', '.webp']
-                    filename = None
-                    
-                    for ext in possible_extensions:
-                        test_file = base_filename.rsplit('.', 1)[0] + ext
-                        if os.path.exists(test_file):
-                            filename = test_file
-                            break
-                    
-                    # Jika tidak ada file gambar, gunakan file asli
-                    if not filename:
-                        filename = base_filename
+                # Jika yt-dlp gagal untuk streaming platform, coba custom extractor
+                if self.is_streaming_platform(platform):
+                    print("Trying custom extractor...")
+                    return await self.download_with_custom_extractor(url, format_type)
                 else:
-                    filename = ydl.prepare_filename(info)
-                
-                return {
-                    'success': True,
-                    'filepath': filename,
-                    'title': info.get('title', 'Unknown'),
-                    'duration': info.get('duration', 0)
-                }
+                    raise yt_error
         
         except Exception as e:
             return {
@@ -423,6 +815,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         welcome_msg, 
         parse_mode='Markdown',
         reply_markup=keyboard
+    )
+
+async def platforms_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handler untuk command /platforms"""
+    lang = get_user_language(update)
+    platforms_msg = LANGUAGES[lang]['platforms_list']
+    
+    # Keyboard dengan tombol kembali
+    keyboard = [[InlineKeyboardButton("🏠 Menu Utama" if lang == 'id' else "🏠 Main Menu", callback_data="back_to_menu")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_text(
+        platforms_msg,
+        parse_mode='Markdown',
+        reply_markup=reply_markup
     )
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -546,6 +953,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await start(update, context)
         return
     
+    elif text in [LANGUAGES['id']['menu_platforms'], LANGUAGES['en']['menu_platforms']]:
+        await platforms_command(update, context)
+        return
+    
     # Validate URL
     url_pattern = re.compile(
         r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
@@ -568,36 +979,71 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    # Store URL
+    # Store URL dan platform info
     url_id = str(hash(url))[-8:]
-    context.user_data[url_id] = url
+    context.user_data[url_id] = {
+        'url': url,
+        'platform': platform,
+        'is_streaming': bot.is_streaming_platform(platform)
+    }
     
-    # Create download buttons
-    keyboard = [
-        [
-            InlineKeyboardButton(
-                LANGUAGES[lang]['video_button'], 
-                callback_data=f"v|{url_id}|{lang}"
-            ),
-            InlineKeyboardButton(
-                LANGUAGES[lang]['audio_button'], 
-                callback_data=f"a|{url_id}|{lang}"
-            )
+    # Buat keyboard berdasarkan tipe platform
+    is_streaming = bot.is_streaming_platform(platform)
+    
+    if is_streaming:
+        # Untuk streaming platforms - tombol lebih sederhana
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    LANGUAGES[lang]['video_button'], 
+                    callback_data=f"v|{url_id}|{lang}"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    LANGUAGES[lang]['audio_button'], 
+                    callback_data=f"a|{url_id}|{lang}"
+                )
+            ]
         ]
-    ]
-    
-    # Tambahkan button foto untuk Instagram, TikTok, dan Pinterest
-    if platform in ['instagram', 'tiktok', 'pinterest']:
+        
+        # Tambahkan tombol download langsung untuk streaming
         keyboard.append([
             InlineKeyboardButton(
-                LANGUAGES[lang]['photo_button'], 
-                callback_data=f"p|{url_id}|{lang}"
+                LANGUAGES[lang]['direct_download_button'], 
+                callback_data=f"d|{url_id}|{lang}"
             )
         ])
+        
+        detected_msg = LANGUAGES[lang]['detected_streaming'].format(platform.upper())
+    else:
+        # Untuk sosial media - tombol standar
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    LANGUAGES[lang]['video_button'], 
+                    callback_data=f"v|{url_id}|{lang}"
+                ),
+                InlineKeyboardButton(
+                    LANGUAGES[lang]['audio_button'], 
+                    callback_data=f"a|{url_id}|{lang}"
+                )
+            ]
+        ]
+        
+        # Tambahkan button foto untuk Instagram, TikTok, dan Pinterest
+        if platform in ['instagram', 'tiktok', 'pinterest']:
+            keyboard.append([
+                InlineKeyboardButton(
+                    LANGUAGES[lang]['photo_button'], 
+                    callback_data=f"p|{url_id}|{lang}"
+                )
+            ])
+        
+        detected_msg = get_text(update, 'detected').format(platform.upper())
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    detected_msg = get_text(update, 'detected').format(platform.upper())
     await update.message.reply_text(
         detected_msg,
         reply_markup=reply_markup,
@@ -608,6 +1054,16 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler untuk button callback"""
     query = update.callback_query
     await query.answer()
+    
+    # Handle back to menu
+    if query.data == "back_to_menu":
+        lang = 'id' if query.from_user.language_code and query.from_user.language_code.lower().startswith('id') else 'en'
+        welcome_msg = LANGUAGES[lang]['welcome']
+        await query.message.edit_text(
+            welcome_msg,
+            parse_mode='Markdown'
+        )
+        return
     
     # Handle refresh stats
     if query.data == "refresh_stats":
@@ -660,13 +1116,24 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url_id = data[1]
     lang = data[2] if len(data) > 2 else 'en'
     
-    url = context.user_data.get(url_id)
+    # Ambil data URL (format baru dengan dict)
+    url_data = context.user_data.get(url_id)
     
-    if not url:
+    if not url_data:
         await query.message.reply_text(
             "❌ Link expired! Please send the link again." if lang == 'en' else "❌ Link kadaluarsa! Kirim ulang link-nya."
         )
         return
+    
+    # Handle format lama (string) dan baru (dict)
+    if isinstance(url_data, str):
+        url = url_data
+        platform = bot.detect_platform(url)
+        is_streaming = bot.is_streaming_platform(platform)
+    else:
+        url = url_data.get('url')
+        platform = url_data.get('platform', 'unknown')
+        is_streaming = url_data.get('is_streaming', False)
     
     # Tentukan format type
     if format_code == 'v':
@@ -675,13 +1142,20 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         format_type = 'audio'
     elif format_code == 'p':
         format_type = 'photo'
+    elif format_code == 'd':
+        format_type = 'video'  # Direct download = video
     else:
         format_type = 'video'
     
-    downloading_msg = LANGUAGES[lang]['downloading'].format(
-        'foto' if format_type == 'photo' else LANGUAGES[lang][format_type]
-    )
-    status_msg = await query.message.reply_text(downloading_msg)
+    # Pesan download berbeda untuk streaming
+    if is_streaming:
+        downloading_msg = LANGUAGES[lang]['downloading_streaming'].format(platform.upper())
+    else:
+        downloading_msg = LANGUAGES[lang]['downloading'].format(
+            'foto' if format_type == 'photo' else LANGUAGES[lang][format_type]
+        )
+    
+    status_msg = await query.message.reply_text(downloading_msg, parse_mode='Markdown')
     
     try:
         result = await bot.download_media(url, format_type)
@@ -690,6 +1164,13 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await status_msg.edit_text(LANGUAGES[lang]['sending'])
             
             filepath = result['filepath']
+            
+            # Cek apakah file exists
+            if not os.path.exists(filepath):
+                await status_msg.edit_text(
+                    LANGUAGES[lang]['download_failed'].format("File tidak ditemukan setelah download")
+                )
+                return
             
             # Cek ukuran file
             file_size = os.path.getsize(filepath)
@@ -717,22 +1198,35 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             elif format_type == 'audio':
                 caption = LANGUAGES[lang]['audio_caption'].format(result['title'])
-                with open(filepath, 'rb') as audio:
-                    await query.message.reply_audio(
-                        audio=audio,
-                        title=result['title'],
-                        duration=int(result['duration']) if result['duration'] else None,
-                        caption=caption,
-                        parse_mode='Markdown'
-                    )
+                try:
+                    with open(filepath, 'rb') as audio:
+                        await query.message.reply_audio(
+                            audio=audio,
+                            title=result['title'],
+                            duration=int(result['duration']) if result['duration'] else None,
+                            caption=caption,
+                            parse_mode='Markdown'
+                        )
+                except Exception as audio_error:
+                    print(f"Audio send failed, trying as document: {audio_error}")
+                    with open(filepath, 'rb') as document:
+                        await query.message.reply_document(
+                            document=document,
+                            caption=caption,
+                            parse_mode='Markdown'
+                        )
             else:
                 caption = LANGUAGES[lang]['video_caption'].format(result['title'])
+                
+                # Tambah info platform untuk streaming
+                if is_streaming:
+                    caption += f"\n\n📡 Platform: {platform.upper()}"
                 
                 if file_size > max_size:
                     with open(filepath, 'rb') as document:
                         await query.message.reply_document(
                             document=document,
-                            caption=caption + "\n\n⚠️ File terlalu besar untuk streaming, dikirim sebagai document.",
+                            caption=caption + ("\n\n⚠️ File too large for streaming, sent as document." if lang == 'en' else "\n\n⚠️ File terlalu besar untuk streaming, dikirim sebagai document."),
                             parse_mode='Markdown'
                         )
                 else:
@@ -752,7 +1246,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         with open(filepath, 'rb') as document:
                             await query.message.reply_document(
                                 document=document,
-                                caption=caption + "\n\n📎 Dikirim sebagai document.",
+                                caption=caption + ("\n\n📎 Sent as document." if lang == 'en' else "\n\n📎 Dikirim sebagai document."),
                                 parse_mode='Markdown'
                             )
             
@@ -769,13 +1263,20 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 del context.user_data[url_id]
         
         else:
-            error_msg = LANGUAGES[lang]['download_failed'].format(result['error'])
+            error_text = result.get('error', 'Unknown error')
+            # Truncate long errors
+            if len(error_text) > 200:
+                error_text = error_text[:200] + "..."
+            error_msg = LANGUAGES[lang]['download_failed'].format(error_text)
             await status_msg.edit_text(error_msg)
     
     except Exception as e:
         import traceback
         traceback.print_exc()
-        error_msg = LANGUAGES[lang]['error_occurred'].format(str(e))
+        error_text = str(e)
+        if len(error_text) > 200:
+            error_text = error_text[:200] + "..."
+        error_msg = LANGUAGES[lang]['error_occurred'].format(error_text)
         await status_msg.edit_text(error_msg)
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -786,18 +1287,39 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     """Fungsi utama untuk menjalankan bot"""
-    print("🤖 SafeRobot v3.0 Starting...")
-    print("🌐 Multi-language support: ID/EN")
-    print("🎨 Button menu interface enabled")
-    print("📊 Owner stats & database enabled")
-    print(f"👑 Owner ID: {OWNER_ID}")
-    print("✅ Supported platforms: TikTok, Instagram, Twitter/X, YouTube, Facebook, Pinterest")
-    print(f"💾 Database: {DATABASE_PATH}")
+    print("=" * 60)
+    print("🤖 SafeRobot v4.0 - Multi-Platform Video Downloader")
+    print("=" * 60)
+    print()
+    print("📋 CONFIGURATION:")
+    print(f"   👑 Owner ID: {OWNER_ID}")
+    print(f"   💾 Database: {DATABASE_PATH}")
+    print(f"   📁 Downloads: {DOWNLOAD_PATH}")
+    print()
+    print("🌐 FEATURES:")
+    print("   ✅ Multi-language support: ID/EN")
+    print("   ✅ Button menu interface")
+    print("   ✅ Owner stats & database")
+    print()
+    print("📱 SOCIAL MEDIA PLATFORMS:")
+    print("   • TikTok, Instagram, Twitter/X")
+    print("   • YouTube, Facebook, Pinterest")
+    print()
+    print("🎬 STREAMING PLATFORMS:")
+    print("   • DoodStream (dood.to, dood-hd.com, dll)")
+    print("   • TeraBox (terabox.com, 1024terabox.com)")
+    print("   • Videy (vidoy.com, videypro.live, dll)")
+    print("   • Videq (videq.io, videq.co, dll)")
+    print("   • LuluStream (lulustream.com, lulu.st)")
+    print("   • VidCloud, StreamTape, MixDrop")
+    print("   • Dan 50+ platform streaming lainnya!")
+    print()
     
     application = Application.builder().token(BOT_TOKEN).build()
     
     # Command handlers
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("platforms", platforms_command))
     application.add_handler(CommandHandler("stats", stats_command))
     application.add_handler(CommandHandler("broadcast", broadcast_command))
     
@@ -808,11 +1330,22 @@ def main():
     # Error handler
     application.add_error_handler(error_handler)
     
+    print("=" * 60)
     print("✅ SafeRobot is running!")
-    print("📝 Owner commands:")
-    print("   /stats - Lihat statistik pengguna")
-    print("   /broadcast <pesan> - Kirim pesan ke semua user")
-    print("\nPress Ctrl+C to stop")
+    print("=" * 60)
+    print()
+    print("📝 USER COMMANDS:")
+    print("   /start     - Menu utama")
+    print("   /platforms - Daftar platform yang didukung")
+    print()
+    print("👑 OWNER COMMANDS:")
+    print("   /stats           - Lihat statistik pengguna")
+    print("   /broadcast <msg> - Kirim pesan ke semua user")
+    print()
+    print("🔗 Kirim link untuk mulai download!")
+    print("Press Ctrl+C to stop")
+    print()
+    
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':
