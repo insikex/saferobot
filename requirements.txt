@@ -16,3 +16,10 @@ requests>=2.31.0
 
 # Optional: Untuk performa lebih baik
 aiohttp>=3.9.0
+
+# Browser Automation untuk situs dengan JavaScript berat
+selenium>=4.15.0
+webdriver-manager>=4.0.0
+
+# Async browser automation (alternatif Selenium)
+playwright>=1.40.0
