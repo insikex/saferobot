@@ -13,6 +13,7 @@ import yt_dlp
 from urllib.parse import urlparse, parse_qs, urljoin
 from bs4 import BeautifulSoup
 import hashlib
+import zipfile
 
 # ============================================
 # KONFIGURASI
@@ -22,6 +23,9 @@ OWNER_ID = 6683929810  # GANTI DENGAN USER ID TELEGRAM ANDA
 DOWNLOAD_PATH = "./downloads/"
 DATABASE_PATH = "./users_database.json"
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB limit Telegram
+MAX_ARCHIVE_ITEMS = int(os.getenv("MAX_ARCHIVE_ITEMS", "10"))
+MAX_ARCHIVE_SIZE = int(os.getenv("MAX_ARCHIVE_SIZE", str(MAX_FILE_SIZE)))
+ALLOW_PLAYLIST_ZIP = os.getenv("ALLOW_PLAYLIST_ZIP", "1") == "1"
 COOKIE_FILE = os.getenv("COOKIE_FILE", "./cookies.txt")
 AUTO_INSTALL_PLAYWRIGHT = os.getenv("AUTO_INSTALL_PLAYWRIGHT", "1") == "1"
 PLAYWRIGHT_INSTALL_TIMEOUT = int(os.getenv("PLAYWRIGHT_INSTALL_TIMEOUT", "600"))
@@ -222,6 +226,7 @@ Ketik /platforms untuk daftar lengkap.""",
         'video_caption': "🎥 *{}*\n\n🔥 Downloaded by @SafeRobot",
         'audio_caption': "🎵 *{}*\n\n🔥 Downloaded by @SafeRobot",
         'photo_caption': "📷 *{}*\n\n🔥 Downloaded by @SafeRobot",
+        'archive_caption': "📦 *{}* ({} file)\n\n🔥 Downloaded by @SafeRobot",
         'download_failed': """❌ Download gagal!
 
 Error: {}
@@ -354,6 +359,7 @@ Type /platforms for full list.""",
         'video_caption': "🎥 *{}*\n\n🔥 Downloaded by @SafeRobot",
         'audio_caption': "🎵 *{}*\n\n🔥 Downloaded by @SafeRobot",
         'photo_caption': "📷 *{}*\n\n🔥 Downloaded by @SafeRobot",
+        'archive_caption': "📦 *{}* ({} files)\n\n🔥 Downloaded by @SafeRobot",
         'download_failed': """❌ Download failed!
 
 Error: {}
@@ -702,6 +708,131 @@ class SafeRobot:
             'application/x-mpegurl',
             'application/dash+xml'
         ])
+
+    def _looks_like_collection_url(self, url):
+        parsed = urlparse(url)
+        path = (parsed.path or "").lower()
+        query = parse_qs(parsed.query or "")
+        if any(key in query for key in ['list', 'playlist', 'album', 'collection', 'folder', 'surl']):
+            return True
+        collection_tokens = [
+            '/playlist', '/album', '/collection', '/folder', '/folders',
+            '/dir/', '/directory', '/drive/'
+        ]
+        return any(token in path for token in collection_tokens)
+
+    def _should_allow_playlist(self, url, platform):
+        if not ALLOW_PLAYLIST_ZIP:
+            return False
+        return self._looks_like_collection_url(url)
+
+    def _looks_like_direct_media(self, url, content_type="", content_disposition=""):
+        if self._is_stream_manifest(url, content_type):
+            return True
+        path = urlparse(url).path.lower()
+        media_exts = [
+            '.mp4', '.webm', '.mkv', '.mov', '.m4a', '.mp3',
+            '.m3u8', '.mpd', '.jpg', '.jpeg', '.png', '.webp'
+        ]
+        if any(path.endswith(ext) for ext in media_exts):
+            return True
+        ct = (content_type or "").lower()
+        if ct.startswith(('video/', 'audio/')):
+            return True
+        if 'application/octet-stream' in ct and 'attachment' in (content_disposition or '').lower():
+            return True
+        return False
+
+    def _resolve_downloaded_file(self, filename, format_type):
+        if filename and os.path.exists(filename):
+            return filename
+        if not filename:
+            return None
+        base = filename.rsplit('.', 1)[0]
+        if format_type == 'audio':
+            candidates = ['.mp3', '.m4a', '.aac', '.ogg', '.webm']
+        elif format_type == 'photo':
+            candidates = ['.jpg', '.jpeg', '.png', '.webp']
+        else:
+            candidates = ['.mp4', '.mkv', '.webm', '.mov', '.m4a']
+        for ext in candidates:
+            candidate = base + ext
+            if os.path.exists(candidate):
+                return candidate
+        return None
+
+    def _create_zip_archive(self, files, title):
+        if not files:
+            return None, "No files to archive"
+        total_size = 0
+        for path in files:
+            if os.path.exists(path):
+                total_size += os.path.getsize(path)
+        if total_size > MAX_ARCHIVE_SIZE:
+            total_mb = total_size / (1024 * 1024)
+            limit_mb = MAX_ARCHIVE_SIZE / (1024 * 1024)
+            return None, f"Archive too large ({total_mb:.1f}MB > {limit_mb:.1f}MB)"
+
+        safe_title = re.sub(r'[^A-Za-z0-9._-]+', '_', title or "download").strip('_')
+        if not safe_title:
+            safe_title = "download"
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        title_hash = hashlib.md5((safe_title + timestamp).encode()).hexdigest()[:8]
+        archive_path = f"{DOWNLOAD_PATH}{safe_title[:50]}_{timestamp}_{title_hash}.zip"
+
+        name_counts = {}
+        with zipfile.ZipFile(archive_path, 'w', compression=zipfile.ZIP_STORED) as zipf:
+            for path in files:
+                if not os.path.exists(path):
+                    continue
+                name = os.path.basename(path)
+                if name in name_counts:
+                    name_counts[name] += 1
+                    root, ext = os.path.splitext(name)
+                    name = f"{root}_{name_counts[name]}{ext}"
+                else:
+                    name_counts[name] = 1
+                zipf.write(path, arcname=name)
+
+        return archive_path, None
+
+    def _collect_downloaded_files(self, ydl, info, format_type):
+        def collect_from_info(item):
+            if isinstance(item, dict):
+                candidates = []
+                if item.get('_filename'):
+                    candidates.append(self._resolve_downloaded_file(item.get('_filename'), format_type))
+                for req in (item.get('requested_downloads') or []):
+                    candidates.append(self._resolve_downloaded_file(req.get('filepath'), format_type))
+                for candidate in candidates:
+                    if candidate and os.path.exists(candidate):
+                        return [candidate]
+            try:
+                expected = ydl.prepare_filename(item)
+            except Exception:
+                return []
+            resolved = self._resolve_downloaded_file(expected, format_type)
+            if resolved and os.path.exists(resolved):
+                return [resolved]
+            return []
+
+        files = []
+        entries = info.get('entries') if isinstance(info, dict) else None
+        if entries:
+            for entry in entries:
+                if not entry:
+                    continue
+                files.extend(collect_from_info(entry))
+        else:
+            files.extend(collect_from_info(info))
+
+        unique = []
+        seen = set()
+        for path in files:
+            if path and path not in seen and os.path.exists(path):
+                seen.add(path)
+                unique.append(path)
+        return unique
     
     def _ensure_playwright_browsers(self):
         if not AUTO_INSTALL_PLAYWRIGHT:
@@ -1241,6 +1372,17 @@ class SafeRobot:
             
             session = requests.Session()
             self._load_cookies(session)
+
+            # Quick check: direct media file or manifest
+            try:
+                head_resp = session.head(url, headers=headers, timeout=10, allow_redirects=True)
+                content_type = head_resp.headers.get('content-type', '')
+                content_disp = head_resp.headers.get('content-disposition', '')
+                final_url = head_resp.url or url
+                if self._looks_like_direct_media(final_url, content_type, content_disp):
+                    return [final_url], resolved_url
+            except requests.RequestException:
+                pass
             
             # Try to get the page with session to handle cookies
             response = session.get(url, headers=headers, timeout=30, allow_redirects=True)
@@ -1672,11 +1814,27 @@ class SafeRobot:
                 url = resolved_url
                 platform = self.detect_platform(url)
         is_streaming = self.is_streaming_platform(platform)
+        allow_playlist = self._should_allow_playlist(url, platform)
         
         print(f"[Download] Platform: {platform}, Is Streaming: {is_streaming}, Format: {format_type}")
         
         # Untuk streaming platforms, langsung gunakan custom extractor karena yt-dlp biasanya gagal
         if is_streaming and platform not in ['youtube', 'twitter', 'instagram', 'tiktok', 'facebook']:
+            yt_first = None
+            if allow_playlist:
+                try:
+                    yt_first = await self._download_with_ytdlp(
+                        url,
+                        format_type,
+                        platform,
+                        force_generic=(platform == 'generic'),
+                        allow_playlist=allow_playlist
+                    )
+                    if yt_first.get('success'):
+                        return yt_first
+                except Exception as e:
+                    print(f"[Download] yt-dlp playlist attempt failed: {e}")
+
             print(f"[Download] Using custom extractor for streaming platform: {platform}")
             result = await self.download_with_custom_extractor(url, format_type)
             
@@ -1684,12 +1842,16 @@ class SafeRobot:
             if not result['success']:
                 print(f"[Download] Custom extractor failed, trying yt-dlp as fallback...")
                 try:
-                    yt_result = await self._download_with_ytdlp(
-                        url,
-                        format_type,
-                        platform,
-                        force_generic=(platform == 'generic')
-                    )
+                    if yt_first is not None:
+                        yt_result = yt_first
+                    else:
+                        yt_result = await self._download_with_ytdlp(
+                            url,
+                            format_type,
+                            platform,
+                            force_generic=(platform == 'generic'),
+                            allow_playlist=allow_playlist
+                        )
                     if yt_result['success']:
                         return yt_result
                     if "Unsupported URL" in (yt_result.get('error') or ""):
@@ -1697,7 +1859,8 @@ class SafeRobot:
                             url,
                             format_type,
                             platform,
-                            force_generic=True
+                            force_generic=True,
+                            allow_playlist=allow_playlist
                         )
                         if yt_generic['success']:
                             return yt_generic
@@ -1712,7 +1875,8 @@ class SafeRobot:
                 url,
                 format_type,
                 platform,
-                force_generic=(platform == 'generic')
+                force_generic=(platform == 'generic'),
+                allow_playlist=allow_playlist
             )
             if result['success']:
                 return result
@@ -1723,7 +1887,7 @@ class SafeRobot:
         print(f"[Download] Falling back to custom extractor...")
         return await self.download_with_custom_extractor(url, format_type)
     
-    async def _download_with_ytdlp(self, url, format_type, platform, force_generic=False):
+    async def _download_with_ytdlp(self, url, format_type, platform, force_generic=False, allow_playlist=False):
         """Download menggunakan yt-dlp"""
         try:
             ydl_opts = {
@@ -1751,11 +1915,17 @@ class SafeRobot:
             
             if force_generic:
                 ydl_opts['force_generic_extractor'] = True
-            
+
+            if allow_playlist:
+                ydl_opts['noplaylist'] = False
+                ydl_opts['playlist_items'] = f"1-{MAX_ARCHIVE_ITEMS}"
+                ydl_opts['ignoreerrors'] = True
+            else:
+                ydl_opts['noplaylist'] = True
+
             # Tambahkan opsi khusus untuk streaming platforms
             if self.is_streaming_platform(platform):
                 ydl_opts.update({
-                    'noplaylist': True,
                     'geo_bypass': True,
                     'nocheckcertificate': True,
                     'allow_unplayable_formats': True,
@@ -1788,37 +1958,32 @@ class SafeRobot:
                 
                 if info is None:
                     return {'success': False, 'error': 'No video info extracted'}
-                
-                if format_type == 'audio':
-                    filename = ydl.prepare_filename(info).rsplit('.', 1)[0] + '.mp3'
-                elif format_type == 'photo':
-                    base_filename = ydl.prepare_filename(info)
-                    possible_extensions = ['.jpg', '.jpeg', '.png', '.webp']
-                    filename = None
-                    
-                    for ext in possible_extensions:
-                        test_file = base_filename.rsplit('.', 1)[0] + ext
-                        if os.path.exists(test_file):
-                            filename = test_file
-                            break
-                    
-                    if not filename:
-                        filename = base_filename
-                else:
-                    filename = ydl.prepare_filename(info)
-                
-                # Verify file exists
-                if not os.path.exists(filename):
-                    # Try to find the actual downloaded file
-                    base = filename.rsplit('.', 1)[0]
-                    for ext in ['.mp4', '.webm', '.mkv', '.mp3', '.m4a']:
-                        if os.path.exists(base + ext):
-                            filename = base + ext
-                            break
-                
+
+                files = self._collect_downloaded_files(ydl, info, format_type)
+                if not files:
+                    return {'success': False, 'error': 'Downloaded file not found'}
+
+                if len(files) > 1:
+                    archive_title = info.get('title') or info.get('playlist_title') or 'Downloaded Files'
+                    archive_path, archive_error = self._create_zip_archive(files, archive_title)
+                    for path in files:
+                        if os.path.exists(path):
+                            os.remove(path)
+                    if archive_error:
+                        return {'success': False, 'error': archive_error}
+                    return {
+                        'success': True,
+                        'filepath': archive_path,
+                        'title': archive_title,
+                        'duration': 0,
+                        'is_archive': True,
+                        'item_count': len(files)
+                    }
+
+                filename = files[0]
                 if not os.path.exists(filename):
                     return {'success': False, 'error': 'Downloaded file not found'}
-                
+
                 return {
                     'success': True,
                     'filepath': filename,
@@ -2228,10 +2393,28 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             # Cek ukuran file
             file_size = os.path.getsize(filepath)
-            max_size = 50 * 1024 * 1024  # 50MB limit Telegram
+            max_size = MAX_FILE_SIZE
             
+            if result.get('is_archive'):
+                item_count = result.get('item_count', 0)
+                caption = LANGUAGES[lang]['archive_caption'].format(result.get('title', 'Downloaded Files'), item_count)
+                if file_size > max_size:
+                    size_mb = file_size / (1024 * 1024)
+                    error_text = f"Archive too large ({size_mb:.1f}MB)"
+                    await status_msg.edit_text(LANGUAGES[lang]['download_failed'].format(error_text))
+                    if os.path.exists(filepath):
+                        os.remove(filepath)
+                    if url_id in context.user_data:
+                        del context.user_data[url_id]
+                    return
+                with open(filepath, 'rb') as document:
+                    await query.message.reply_document(
+                        document=document,
+                        caption=caption,
+                        parse_mode='Markdown'
+                    )
             # Kirim berdasarkan format type
-            if format_type == 'photo':
+            elif format_type == 'photo':
                 # Kirim sebagai foto
                 caption = LANGUAGES[lang]['photo_caption'].format(result['title'])
                 try:
