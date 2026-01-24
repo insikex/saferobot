@@ -1,16 +1,18 @@
-# 🤖 SafeRobot v5.0 - Universal Video Downloader Bot
+# 🤖 SafeRobot v6.0 - Universal Video Downloader Bot
 
 Bot Telegram UNIVERSAL untuk mendownload video dari **WEBSITE APAPUN** - seperti 9xbuddy.site!
 
-## 🔥 Apa yang Baru di v5.0?
+## 🔥 Apa yang Baru di v6.0?
 
-### Universal Video Extraction
+### Universal Video Extraction (Enhanced)
 Bot ini sekarang dapat mendownload video dari **hampir semua website** menggunakan teknologi yang sama seperti 9xbuddy.site dan aplikasi browser download di PlayStore:
 
 1. **Network Interception** - Menangkap SEMUA request video/audio dari browser
 2. **Playwright Browser Automation** - Render halaman JavaScript secara penuh
-3. **Multi-Pattern Detection** - Deteksi 40+ pola URL video
-4. **External API Fallback** - Gunakan API eksternal jika metode lain gagal
+3. **Multi-Pattern Detection** - Deteksi 60+ pola URL video
+4. **External API Fallback** - Multiple API (Cobalt, SaveFrom, Y2Mate, dll)
+5. **Specialized Videy/Videq Extractor** - Extractor khusus untuk platform Videy family
+6. **Improved Error Handling** - Retry logic dan better fallbacks
 
 ## ✨ Fitur
 

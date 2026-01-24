@@ -46,30 +46,119 @@ class UniversalVideoExtractor:
     Uses network interception to capture ALL video/audio streams
     """
     
-    # External API services for downloading
+    # External API services for downloading (like 9xbuddy uses)
     EXTERNAL_APIS = [
+        # Cobalt API - reliable for many platforms
         {
             'name': 'cobalt',
-            'url': 'https://api.cobalt.tools/api/json',
+            'url': 'https://co.wuk.sh/api/json',
             'method': 'POST',
             'headers': {'Accept': 'application/json', 'Content-Type': 'application/json'},
             'body_template': {'url': '{url}', 'vCodec': 'h264', 'vQuality': '720', 'aFormat': 'mp3'},
             'response_key': 'url'
         },
         {
+            'name': 'cobalt-alt',
+            'url': 'https://api.cobalt.tools/api/json',
+            'method': 'POST',
+            'headers': {'Accept': 'application/json', 'Content-Type': 'application/json'},
+            'body_template': {'url': '{url}', 'vCodec': 'h264', 'vQuality': '720', 'aFormat': 'mp3'},
+            'response_key': 'url'
+        },
+        # SaveFrom-like API
+        {
+            'name': 'savefrom-worker',
+            'url': 'https://worker.sf-tools.com/savefrom.php',
+            'method': 'POST',
+            'headers': {'Content-Type': 'application/x-www-form-urlencoded'},
+            'data_template': 'sf_url={url}&sf_submit=&new=2&lang=en&app=&country=en&os=Windows&browser=Chrome&channel=main&sf-b=1',
+            'response_path': ['url', 'hosting', 'url_info', 'src']
+        },
+        # AllTubeDownload
+        {
             'name': 'alltubedownload',
             'url': 'https://alltubedownload.net/api/v1/video',
             'method': 'GET',
             'params': {'url': '{url}'},
             'response_key': 'url'
+        },
+        # Y2Mate-like API
+        {
+            'name': 'y2mate-worker',
+            'url': 'https://yt1s.pro/api/json/search',
+            'method': 'POST',
+            'headers': {'Content-Type': 'application/x-www-form-urlencoded'},
+            'data_template': 'q={url}&vt=mp4',
+            'response_path': ['links', 'mp4', 'auto', 'k']
+        },
+        # SnapSave-like API
+        {
+            'name': 'snapsave',
+            'url': 'https://snapsave.app/action.php',
+            'method': 'POST',
+            'headers': {'Content-Type': 'application/x-www-form-urlencoded'},
+            'data_template': 'url={url}',
+            'response_path': ['data', 'url', 'video_url']
+        },
+        # SSYouTube API
+        {
+            'name': 'ssyoutube',
+            'url': 'https://ssyoutube.com/api/convert',
+            'method': 'POST',
+            'headers': {'Content-Type': 'application/json'},
+            'body_template': {'url': '{url}', 'quality': 'highestvideo'},
+            'response_key': 'url'
+        },
+        # 9xbuddy-style direct fetch
+        {
+            'name': '9xbuddy-fetch',
+            'url': 'https://9xbuddy.in/process',
+            'method': 'POST',
+            'headers': {'Content-Type': 'application/x-www-form-urlencoded'},
+            'data_template': 'url={url}',
+            'response_path': ['links', 'url', 'downloadUrl']
+        },
+        # Loader.to API
+        {
+            'name': 'loaderto',
+            'url': 'https://loader.to/api/button/',
+            'method': 'GET',
+            'params': {'url': '{url}', 'f': 'mp4'},
+            'response_key': 'download_url'
         }
     ]
     
-    # Video URL patterns to look for
+    # Additional fallback services (tried after main APIs fail)
+    FALLBACK_EXTRACTORS = [
+        {
+            'name': 'keepvid',
+            'url': 'https://keepvid.works/api/json',
+            'method': 'POST',
+            'data': {'url': '{url}'}
+        },
+        {
+            'name': 'tubeoffline',
+            'url': 'https://www.tubeoffline.com/download.php',
+            'method': 'POST', 
+            'data': {'link': '{url}'}
+        }
+    ]
+    
+    # Videy/Videq family specific CDN patterns
+    VIDEY_CDN_PATTERNS = [
+        r'https?://[a-z0-9-]+\.(?:videy|videq|vidgo|vidoy|vide[0-9]|videypro|vidqy|vidbre|avdeq|vdaq|cdnvideq)\.[a-z]+/[^\s"\'<>]+',
+        r'https?://cdn[0-9]*\.[^\s"\'<>]+/(?:v|e|d|f|stream)/[^\s"\'<>]+',
+        r'https?://[a-z]+[0-9]*\.(?:xyz|pro|cc|to|io|co|me|net)/[^\s"\'<>]+\.mp4[^\s"\'<>]*',
+        r'https?://[^\s"\'<>]+/hls/[^\s"\'<>]+\.m3u8[^\s"\'<>]*',
+        r'https?://[^\s"\'<>]+/embed/[^\s"\'<>]+',
+    ]
+    
+    # Video URL patterns to look for (expanded for better detection)
     VIDEO_PATTERNS = [
         # Direct video files
         r'https?://[^\s"\'<>]+\.(?:mp4|webm|mkv|avi|mov|m4v|flv)(?:\?[^\s"\'<>]*)?',
         r'https?://[^\s"\'<>]+\.(?:m3u8|mpd)(?:\?[^\s"\'<>]*)?',
+        r'https?://[^\s"\'<>]+\.ts(?:\?[^\s"\'<>]*)?',
         
         # Common video hosting patterns
         r'(?:src|source|file|video|stream|url|href)["\']?\s*[:=]\s*["\']([^"\']+\.(?:mp4|m3u8|webm|mpd)[^"\']*)["\']',
@@ -109,6 +198,35 @@ class UniversalVideoExtractor:
         # Hex/Unicode encoded
         r'\\x68\\x74\\x74\\x70[^"\']+',
         r'\\u0068\\u0074\\u0074\\u0070[^"\']+',
+        
+        # New patterns for streaming sites
+        r'(?:download|direct|link|source|stream)_?(?:url|link|src)["\']?\s*[:=]\s*["\']([^"\']+)["\']',
+        r'(?:hls|dash|mpd)_?(?:url|src|manifest)["\']?\s*[:=]\s*["\']([^"\']+)["\']',
+        
+        # JSON embedded video URLs
+        r'"(?:url|file|src|source|video|stream|download)":\s*"(https?://[^"]+)"',
+        r"'(?:url|file|src|source|video|stream|download)':\s*'(https?://[^']+)'",
+        
+        # Videy/Videq specific patterns
+        r'https?://[a-z0-9-]+\.[a-z]+/(?:v|e|d|f|embed|stream)/[a-zA-Z0-9]+',
+        r'https?://cdn[0-9]*\.[^\s"\'<>]+/[^\s"\'<>]+\.mp4',
+        
+        # HLS segments and playlists
+        r'https?://[^\s"\'<>]+/(?:hls|live|stream)/[^\s"\'<>]+\.m3u8[^\s"\'<>]*',
+        r'https?://[^\s"\'<>]+/(?:manifest|playlist)[^\s"\'<>]*\.m3u8[^\s"\'<>]*',
+        
+        # Common streaming domains
+        r'https?://[^\s"\'<>]*(?:\.akamaized\.net|\.cloudfront\.net|\.fastly\.net)[^\s"\'<>]+\.(?:mp4|m3u8|ts)',
+        
+        # Eval/encoded function results often contain URLs
+        r'(?:decodeURIComponent|unescape)\(["\']([^"\']+)["\']',
+        
+        # Video player configuration objects
+        r'config\s*[:=]\s*\{[^}]*["\']?(?:url|file|src)["\']?\s*:\s*["\']([^"\']+)["\']',
+        r'options\s*[:=]\s*\{[^}]*["\']?(?:url|file|src)["\']?\s*:\s*["\']([^"\']+)["\']',
+        
+        # Iframe with video
+        r'<iframe[^>]+src=["\']([^"\']+(?:embed|player|video)[^"\']*)["\']',
     ]
     
     # MIME types that indicate video/audio content
@@ -121,6 +239,194 @@ class UniversalVideoExtractor:
     def __init__(self):
         self._playwright_ready = False
         self._browser = None
+    
+    async def extract_videy_family(self, url: str) -> List[str]:
+        """
+        Specialized extractor for Videy/Videq family platforms
+        These platforms use similar JavaScript obfuscation techniques
+        """
+        video_urls = []
+        
+        try:
+            session = requests.Session()
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Referer': url
+            }
+            
+            # Step 1: Get the embed page
+            print(f"[VideyExtractor] Fetching embed page: {url}")
+            resp = session.get(url, headers=headers, timeout=30, allow_redirects=True)
+            html = resp.text
+            resolved_url = resp.url
+            
+            # Step 2: Extract video ID from URL
+            video_id = None
+            id_patterns = [
+                r'/e/([a-zA-Z0-9]+)',
+                r'/v/([a-zA-Z0-9]+)',
+                r'/embed/([a-zA-Z0-9]+)',
+                r'/watch/([a-zA-Z0-9]+)',
+                r'/([a-zA-Z0-9]{8,12})(?:\?|$|/)',
+            ]
+            
+            for pattern in id_patterns:
+                match = re.search(pattern, url)
+                if match:
+                    video_id = match.group(1)
+                    break
+            
+            print(f"[VideyExtractor] Video ID: {video_id}")
+            
+            # Step 3: Look for packed JavaScript and decode it
+            packed_patterns = [
+                r"eval\(function\(p,a,c,k,e,[rd]\).*?\.split\('\|'\)\)",
+                r'<script[^>]*>([^<]*eval\(function[^<]+)</script>',
+            ]
+            
+            decoded_parts = []
+            for pattern in packed_patterns:
+                matches = re.findall(pattern, html, re.DOTALL | re.IGNORECASE)
+                for match in matches:
+                    decoded = self._decode_packed_js(match if isinstance(match, str) else match[0])
+                    if decoded:
+                        decoded_parts.append(decoded)
+            
+            # Combine original HTML with decoded parts
+            full_content = html + '\n'.join(decoded_parts)
+            
+            # Step 4: Look for video URLs in the content
+            video_patterns = [
+                # Direct MP4/M3U8 URLs
+                r'https?://[^\s"\'<>]+\.mp4(?:\?[^\s"\'<>]*)?',
+                r'https?://[^\s"\'<>]+\.m3u8(?:\?[^\s"\'<>]*)?',
+                
+                # Videy CDN patterns
+                r'https?://cdn[0-9]*\.[^\s"\'<>]+/[^\s"\'<>]+\.mp4[^\s"\'<>]*',
+                r'https?://[a-z0-9-]+\.[a-z]+/v/[^\s"\'<>]+',
+                r'https?://[a-z0-9-]+\.[a-z]+/d/[^\s"\'<>]+',
+                
+                # JavaScript source patterns
+                r'(?:file|source|src|url|video)[\'":\s]+[\'"]?(https?://[^\s"\'<>]+\.(?:mp4|m3u8|webm)[^\s"\'<>]*)[\'"]?',
+                r'sources\s*:\s*\[\s*\{[^}]*[\'"]?file[\'"]?\s*:\s*[\'"]([^\'"]+)[\'"]',
+                r'player\.src\s*\([\'"]([^\'"]+)[\'"]',
+            ]
+            
+            for pattern in video_patterns:
+                matches = re.findall(pattern, full_content, re.IGNORECASE)
+                video_urls.extend(matches)
+            
+            # Step 5: Try to find API endpoints
+            parsed = urlparse(resolved_url)
+            base_url = f"{parsed.scheme}://{parsed.netloc}"
+            
+            if video_id:
+                # Common Videy family API endpoints
+                api_endpoints = [
+                    f'{base_url}/api/source/{video_id}',
+                    f'{base_url}/api/video/{video_id}',
+                    f'{base_url}/api/file/{video_id}',
+                    f'{base_url}/dl?op=download_orig&id={video_id}',
+                    f'{base_url}/download/{video_id}',
+                    f'{base_url}/get/{video_id}',
+                    f'{base_url}/source/{video_id}',
+                    f'{base_url}/stream/{video_id}',
+                ]
+                
+                for endpoint in api_endpoints:
+                    try:
+                        print(f"[VideyExtractor] Trying API: {endpoint}")
+                        api_resp = session.get(endpoint, headers={**headers, 'Referer': resolved_url}, timeout=10)
+                        
+                        if api_resp.status_code == 200:
+                            # Try JSON response
+                            try:
+                                data = api_resp.json()
+                                for key in ['url', 'file', 'src', 'source', 'link', 'download', 'stream']:
+                                    if key in data:
+                                        val = data[key]
+                                        if isinstance(val, str) and val.startswith('http'):
+                                            video_urls.append(val)
+                                        elif isinstance(val, list):
+                                            for item in val:
+                                                if isinstance(item, str):
+                                                    video_urls.append(item)
+                                                elif isinstance(item, dict):
+                                                    for subkey in ['url', 'file', 'src', 'link']:
+                                                        if subkey in item:
+                                                            video_urls.append(item[subkey])
+                            except json.JSONDecodeError:
+                                # Plain text response
+                                if api_resp.text.startswith('http'):
+                                    video_urls.append(api_resp.text.strip())
+                                else:
+                                    # Look for URLs in response
+                                    for pattern in video_patterns[:3]:
+                                        matches = re.findall(pattern, api_resp.text, re.IGNORECASE)
+                                        video_urls.extend(matches)
+                    except:
+                        continue
+                
+                # POST requests
+                for endpoint in api_endpoints[:3]:
+                    try:
+                        api_resp = session.post(
+                            endpoint,
+                            headers={**headers, 'Referer': resolved_url, 'Content-Type': 'application/x-www-form-urlencoded'},
+                            data={'id': video_id, 'op': 'download_orig'},
+                            timeout=10
+                        )
+                        if api_resp.status_code == 200:
+                            try:
+                                data = api_resp.json()
+                                for key in ['url', 'file', 'src', 'result']:
+                                    if key in data:
+                                        val = data[key]
+                                        if isinstance(val, str) and val.startswith('http'):
+                                            video_urls.append(val)
+                            except:
+                                pass
+                    except:
+                        continue
+            
+            # Step 6: Look for hidden iframes with video
+            soup = BeautifulSoup(html, 'html.parser')
+            for iframe in soup.find_all('iframe', src=True):
+                iframe_url = iframe.get('src')
+                if iframe_url:
+                    if iframe_url.startswith('//'):
+                        iframe_url = 'https:' + iframe_url
+                    elif not iframe_url.startswith('http'):
+                        iframe_url = urljoin(resolved_url, iframe_url)
+                    
+                    try:
+                        iframe_resp = session.get(iframe_url, headers={**headers, 'Referer': resolved_url}, timeout=15)
+                        iframe_content = iframe_resp.text
+                        
+                        # Decode packed JS in iframe
+                        for pattern in packed_patterns:
+                            matches = re.findall(pattern, iframe_content, re.DOTALL | re.IGNORECASE)
+                            for match in matches:
+                                decoded = self._decode_packed_js(match if isinstance(match, str) else match[0])
+                                if decoded:
+                                    iframe_content += '\n' + decoded
+                        
+                        for pattern in video_patterns:
+                            matches = re.findall(pattern, iframe_content, re.IGNORECASE)
+                            video_urls.extend(matches)
+                    except:
+                        pass
+            
+            print(f"[VideyExtractor] Found {len(video_urls)} potential URLs")
+            
+        except Exception as e:
+            print(f"[VideyExtractor] Error: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        return video_urls
         
     async def ensure_playwright_ready(self):
         """Ensure Playwright browsers are installed"""
@@ -156,10 +462,11 @@ class UniversalVideoExtractor:
             print(f"[Playwright] Installation error: {e}")
             return False
     
-    async def extract_with_network_interception(self, url: str, timeout: int = 45) -> List[str]:
+    async def extract_with_network_interception(self, url: str, timeout: int = 60) -> List[str]:
         """
         Extract video URLs by intercepting network requests (like browser apps do)
         This is the key feature that makes 9xbuddy and browser apps work
+        Enhanced with longer waits and more triggers
         """
         video_urls = []
         
@@ -179,16 +486,39 @@ class UniversalVideoExtractor:
                         '--disable-dev-shm-usage',
                         '--disable-blink-features=AutomationControlled',
                         '--disable-web-security',
-                        '--disable-features=IsolateOrigins,site-per-process'
+                        '--disable-features=IsolateOrigins,site-per-process',
+                        '--disable-site-isolation-trials',
+                        '--allow-running-insecure-content',
+                        '--disable-gpu'
                     ]
                 )
                 
                 context = await browser.new_context(
-                    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
                     viewport={'width': 1920, 'height': 1080},
                     java_script_enabled=True,
-                    ignore_https_errors=True
+                    ignore_https_errors=True,
+                    bypass_csp=True
                 )
+                
+                # Add cookies if available
+                if COOKIE_FILE and os.path.exists(COOKIE_FILE):
+                    try:
+                        from http.cookiejar import MozillaCookieJar
+                        jar = MozillaCookieJar(COOKIE_FILE)
+                        jar.load(ignore_discard=True, ignore_expires=True)
+                        cookies = []
+                        for cookie in jar:
+                            cookies.append({
+                                'name': cookie.name,
+                                'value': cookie.value,
+                                'domain': cookie.domain,
+                                'path': cookie.path
+                            })
+                        if cookies:
+                            await context.add_cookies(cookies)
+                    except:
+                        pass
                 
                 # Network interception - this is the magic!
                 captured_urls = []
@@ -198,59 +528,120 @@ class UniversalVideoExtractor:
                     try:
                         resp_url = response.url
                         content_type = response.headers.get('content-type', '').lower()
+                        content_length = response.headers.get('content-length', '0')
                         
                         # Check if it's a media file
                         is_media = any(mime in content_type for mime in self.MEDIA_MIME_TYPES)
                         
-                        # Check URL patterns for video files
-                        is_video_url = any(ext in resp_url.lower() for ext in [
-                            '.mp4', '.m3u8', '.webm', '.mpd', '.ts',
-                            '/video/', '/stream/', '/media/', '/cdn/',
-                            'manifest', 'playlist', 'chunk'
-                        ])
+                        # Check URL patterns for video files (expanded list)
+                        video_indicators = [
+                            '.mp4', '.m3u8', '.webm', '.mpd', '.ts', '.m4v',
+                            '/video/', '/stream/', '/media/', '/cdn/', '/hls/',
+                            '/dash/', '/manifest', '/playlist', '/chunk', '/source/',
+                            '/download/', '/get/', '/dl/', '/file/', '/v/',
+                            'videy', 'videq', 'vidgo', 'cdn'
+                        ]
+                        is_video_url = any(ext in resp_url.lower() for ext in video_indicators)
                         
-                        if is_media or is_video_url:
+                        # Check for large content (likely video)
+                        try:
+                            is_large = int(content_length) > 100000  # > 100KB
+                        except:
+                            is_large = False
+                        
+                        if is_media or is_video_url or (is_large and 'octet-stream' in content_type):
                             # Exclude tracking/ad URLs
                             exclude_patterns = [
                                 'google', 'facebook', 'analytics', 'tracking',
-                                'adsense', 'doubleclick', 'pixel', '.js', '.css',
-                                'beacon', 'telemetry'
+                                'adsense', 'doubleclick', 'pixel', 'beacon',
+                                'telemetry', 'fonts.', 'gtag', 'clarity'
                             ]
+                            # Don't exclude .js for streaming players
                             if not any(ex in resp_url.lower() for ex in exclude_patterns):
                                 captured_urls.append(resp_url)
                                 print(f"[NetworkInterceptor] Captured: {resp_url[:100]}...")
                     except Exception:
                         pass
                 
+                async def intercept_request(request):
+                    """Also capture requests that look like video requests"""
+                    try:
+                        req_url = request.url
+                        video_exts = ['.mp4', '.m3u8', '.webm', '.ts', '.mpd']
+                        if any(ext in req_url.lower() for ext in video_exts):
+                            if req_url not in captured_urls:
+                                captured_urls.append(req_url)
+                                print(f"[NetworkInterceptor] Captured request: {req_url[:100]}...")
+                    except:
+                        pass
+                
                 page = await context.new_page()
                 page.on('response', intercept_response)
+                page.on('request', intercept_request)
                 
                 # Navigate and wait for network activity
                 try:
-                    await page.goto(url, wait_until='networkidle', timeout=timeout * 1000)
+                    await page.goto(url, wait_until='domcontentloaded', timeout=timeout * 1000)
                 except Exception as e:
                     print(f"[NetworkInterceptor] Page load error (continuing): {e}")
                 
-                # Wait for dynamic content and video player initialization
+                # Wait for initial content load
+                await asyncio.sleep(3)
+                
+                # Try to wait for network idle
+                try:
+                    await page.wait_for_load_state('networkidle', timeout=15000)
+                except:
+                    pass
+                
+                # Wait longer for dynamic content and video player initialization
                 await asyncio.sleep(5)
                 
-                # Try to trigger video playback
-                try:
-                    # Click on common play buttons
-                    play_selectors = [
-                        'video', '.play-button', '#play', '.btn-play',
-                        '[data-play]', '.vjs-big-play-button', '.plyr__control--play',
-                        '.jw-icon-playback', 'button[aria-label*="Play"]'
-                    ]
-                    for selector in play_selectors:
-                        try:
-                            elem = await page.query_selector(selector)
-                            if elem:
-                                await elem.click()
-                                await asyncio.sleep(2)
+                # Try to trigger video playback with multiple attempts
+                play_selectors = [
+                    'video', 'audio',
+                    '.play-button', '#play', '.btn-play', '.play-btn',
+                    '[data-play]', '.vjs-big-play-button', '.plyr__control--play',
+                    '.jw-icon-playback', 'button[aria-label*="Play"]', 'button[aria-label*="play"]',
+                    '.player-play', '#player', '.video-js', '.plyr',
+                    '[class*="play"]', '[id*="play"]', 'button svg',
+                    '.overlay', '.poster', '.thumbnail', 'img[src*="thumb"]'
+                ]
+                
+                for selector in play_selectors:
+                    try:
+                        elem = await page.query_selector(selector)
+                        if elem:
+                            await elem.click()
+                            await asyncio.sleep(2)
+                            # Check if we got new URLs
+                            if len(captured_urls) > 0:
                                 break
-                        except:
-                            pass
+                    except:
+                        pass
+                
+                # Try JavaScript play commands
+                try:
+                    await page.evaluate("""
+                        () => {
+                            // Try to play all videos
+                            document.querySelectorAll('video').forEach(v => {
+                                try { v.play(); } catch(e) {}
+                            });
+                            // Click any play-looking elements
+                            document.querySelectorAll('[class*="play"], [id*="play"], .btn').forEach(el => {
+                                try { el.click(); } catch(e) {}
+                            });
+                        }
+                    """)
+                    await asyncio.sleep(3)
+                except:
+                    pass
+                
+                # Scroll to trigger lazy loading
+                try:
+                    await page.evaluate("window.scrollTo(0, document.body.scrollHeight / 2)")
+                    await asyncio.sleep(2)
                 except:
                     pass
                 
@@ -478,6 +869,67 @@ class UniversalVideoExtractor:
         except:
             return code
     
+    async def try_direct_download(self, url: str, referer: str = None) -> Optional[str]:
+        """
+        Try to download directly from URL - checks if it's a valid video file
+        Returns the URL if valid, None otherwise
+        """
+        try:
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+                'Accept': '*/*',
+                'Accept-Language': 'en-US,en;q=0.9',
+            }
+            if referer:
+                headers['Referer'] = referer
+                parsed = urlparse(referer)
+                headers['Origin'] = f"{parsed.scheme}://{parsed.netloc}"
+            
+            # Do a HEAD request first to check content type
+            resp = requests.head(url, headers=headers, timeout=15, allow_redirects=True)
+            
+            content_type = resp.headers.get('content-type', '').lower()
+            content_length = resp.headers.get('content-length', '0')
+            
+            # Check if it's a video
+            if any(mime in content_type for mime in ['video/', 'audio/', 'octet-stream', 'mpegurl']):
+                print(f"[DirectDownload] Valid video URL: {url[:100]}...")
+                return url
+            
+            # Check by extension
+            if any(ext in url.lower() for ext in ['.mp4', '.m3u8', '.webm', '.ts', '.mpd']):
+                try:
+                    size = int(content_length)
+                    if size > 10000:  # > 10KB
+                        print(f"[DirectDownload] Valid video URL by extension: {url[:100]}...")
+                        return url
+                except:
+                    pass
+            
+            # Try GET with range to verify
+            headers['Range'] = 'bytes=0-1024'
+            resp = requests.get(url, headers=headers, timeout=15, allow_redirects=True)
+            
+            if resp.status_code in [200, 206]:
+                content = resp.content
+                # Check for video file signatures
+                # MP4: starts with ftyp or moov
+                # WebM: starts with 0x1A 0x45 0xDF 0xA3
+                if content[:4] in [b'ftyp', b'moov', b'\x00\x00\x00\x18', b'\x00\x00\x00\x1c', b'\x00\x00\x00\x20']:
+                    print(f"[DirectDownload] Valid MP4 by signature: {url[:100]}...")
+                    return url
+                if content[:4] == b'\x1a\x45\xdf\xa3':
+                    print(f"[DirectDownload] Valid WebM by signature: {url[:100]}...")
+                    return url
+                if b'#EXTM3U' in content:
+                    print(f"[DirectDownload] Valid M3U8 playlist: {url[:100]}...")
+                    return url
+                    
+        except Exception as e:
+            print(f"[DirectDownload] Error checking URL: {e}")
+        
+        return None
+    
     def _clean_video_urls(self, urls: List[str], base_url: str) -> List[str]:
         """Clean, validate and deduplicate video URLs"""
         cleaned = []
@@ -490,6 +942,14 @@ class UniversalVideoExtractor:
                 continue
             
             url = url.strip()
+            
+            # Unescape common escapes
+            try:
+                url = url.replace('\\/', '/')
+                if '\\x' in url or '\\u' in url:
+                    url = url.encode().decode('unicode_escape')
+            except:
+                pass
             
             # Skip invalid URLs
             if url.startswith(('data:', 'blob:', 'javascript:', '#')):
@@ -518,9 +978,10 @@ class UniversalVideoExtractor:
             
             # Must contain video indicators
             video_indicators = [
-                '.mp4', '.m3u8', '.webm', '.mkv', '.avi', '.mov', '.mpd', '.ts',
+                '.mp4', '.m3u8', '.webm', '.mkv', '.avi', '.mov', '.mpd', '.ts', '.m4v',
                 'video', 'stream', 'media', 'cdn', 'download', 'play', 'source',
-                'manifest', 'playlist', 'chunk'
+                'manifest', 'playlist', 'chunk', '/v/', '/e/', '/d/', '/f/',
+                'videy', 'videq', 'vidgo', 'hls', 'dash', 'embed', '/get/'
             ]
             if not any(ind in url.lower() for ind in video_indicators):
                 continue
@@ -529,21 +990,40 @@ class UniversalVideoExtractor:
                 seen.add(url)
                 cleaned.append(url)
         
-        # Sort by priority (MP4 first, then quality)
+        # Sort by priority (MP4 first, then quality, prefer CDN URLs)
         def priority(u):
             u_lower = u.lower()
+            score = 100
+            
+            # Prefer direct MP4 files
             if '.mp4' in u_lower:
-                if '1080' in u_lower: return 0
-                if '720' in u_lower: return 1
-                if '480' in u_lower: return 2
-                return 3
+                score = 10
+                if '1080' in u_lower or 'hd' in u_lower: score = 0
+                elif '720' in u_lower: score = 1
+                elif '480' in u_lower: score = 2
+                elif '360' in u_lower: score = 3
             elif '.webm' in u_lower:
-                return 5
+                score = 15
             elif '.m3u8' in u_lower:
-                return 10
+                score = 20
             elif '.mpd' in u_lower:
-                return 11
-            return 20
+                score = 21
+            elif '.ts' in u_lower:
+                score = 25
+            
+            # Boost CDN URLs (more reliable)
+            if 'cdn' in u_lower or any(cdn in u_lower for cdn in ['akamai', 'cloudfront', 'fastly']):
+                score -= 5
+            
+            # Boost videy family CDN URLs
+            if any(v in u_lower for v in ['videy', 'videq', 'vidgo', 'vidoy']):
+                score -= 3
+            
+            # Penalize embed/player URLs (not direct video)
+            if '/embed/' in u_lower or '/player/' in u_lower:
+                score += 50
+            
+            return score
         
         cleaned.sort(key=priority)
         
@@ -551,20 +1031,37 @@ class UniversalVideoExtractor:
         return cleaned
     
     async def try_external_apis(self, url: str) -> Optional[str]:
-        """Try external download APIs as fallback"""
+        """Try external download APIs as fallback (like 9xbuddy uses multiple APIs)"""
+        from urllib.parse import quote
+        
         for api in self.EXTERNAL_APIS:
             try:
                 print(f"[ExternalAPI] Trying {api['name']}...")
                 
+                encoded_url = quote(url, safe='')
+                
                 if api['method'] == 'POST':
-                    body = json.dumps({k: v.replace('{url}', url) if isinstance(v, str) else v 
-                                      for k, v in api['body_template'].items()})
-                    resp = requests.post(
-                        api['url'],
-                        headers=api.get('headers', {}),
-                        data=body,
-                        timeout=30
-                    )
+                    if 'body_template' in api:
+                        # JSON body
+                        body = json.dumps({k: v.replace('{url}', url) if isinstance(v, str) else v 
+                                          for k, v in api['body_template'].items()})
+                        resp = requests.post(
+                            api['url'],
+                            headers=api.get('headers', {}),
+                            data=body,
+                            timeout=30
+                        )
+                    elif 'data_template' in api:
+                        # Form data
+                        data = api['data_template'].replace('{url}', encoded_url)
+                        resp = requests.post(
+                            api['url'],
+                            headers=api.get('headers', {}),
+                            data=data,
+                            timeout=30
+                        )
+                    else:
+                        continue
                 else:
                     params = {k: v.replace('{url}', url) for k, v in api.get('params', {}).items()}
                     resp = requests.get(
@@ -575,11 +1072,51 @@ class UniversalVideoExtractor:
                     )
                 
                 if resp.status_code == 200:
-                    data = resp.json()
-                    video_url = data.get(api['response_key'])
-                    if video_url and video_url.startswith('http'):
-                        print(f"[ExternalAPI] {api['name']} returned: {video_url[:100]}...")
-                        return video_url
+                    try:
+                        data = resp.json()
+                        
+                        # Handle simple response key
+                        if 'response_key' in api:
+                            video_url = data.get(api['response_key'])
+                            if video_url and isinstance(video_url, str) and video_url.startswith('http'):
+                                print(f"[ExternalAPI] {api['name']} returned: {video_url[:100]}...")
+                                return video_url
+                        
+                        # Handle complex response path
+                        if 'response_path' in api:
+                            for path in api['response_path']:
+                                if path in data:
+                                    val = data[path]
+                                    if isinstance(val, str) and val.startswith('http'):
+                                        print(f"[ExternalAPI] {api['name']} returned: {val[:100]}...")
+                                        return val
+                                    elif isinstance(val, dict):
+                                        for key in ['url', 'file', 'src', 'link', 'download']:
+                                            if key in val:
+                                                v = val[key]
+                                                if isinstance(v, str) and v.startswith('http'):
+                                                    print(f"[ExternalAPI] {api['name']} returned: {v[:100]}...")
+                                                    return v
+                                    elif isinstance(val, list) and len(val) > 0:
+                                        first = val[0]
+                                        if isinstance(first, str) and first.startswith('http'):
+                                            return first
+                                        elif isinstance(first, dict):
+                                            for key in ['url', 'file', 'src']:
+                                                if key in first:
+                                                    return first[key]
+                        
+                        # Generic search for video URL in response
+                        video_url = self._find_video_url_in_json(data)
+                        if video_url:
+                            print(f"[ExternalAPI] {api['name']} found: {video_url[:100]}...")
+                            return video_url
+                            
+                    except json.JSONDecodeError:
+                        # Not JSON, check if direct URL
+                        text = resp.text.strip()
+                        if text.startswith('http') and any(ext in text.lower() for ext in ['.mp4', '.m3u8', '.webm']):
+                            return text
                         
             except Exception as e:
                 print(f"[ExternalAPI] {api['name']} failed: {e}")
@@ -587,13 +1124,66 @@ class UniversalVideoExtractor:
         
         return None
     
+    def _find_video_url_in_json(self, data, depth=0) -> Optional[str]:
+        """Recursively search for video URLs in JSON data"""
+        if depth > 5:
+            return None
+        
+        if isinstance(data, str):
+            if data.startswith('http') and any(ext in data.lower() for ext in ['.mp4', '.m3u8', '.webm', '.ts', 'video', 'stream']):
+                return data
+        elif isinstance(data, dict):
+            # Priority keys
+            for key in ['url', 'file', 'src', 'source', 'download', 'stream', 'video', 'link', 'mp4', 'hls']:
+                if key in data:
+                    result = self._find_video_url_in_json(data[key], depth + 1)
+                    if result:
+                        return result
+            # Check all values
+            for val in data.values():
+                result = self._find_video_url_in_json(val, depth + 1)
+                if result:
+                    return result
+        elif isinstance(data, list):
+            for item in data[:10]:  # Limit to first 10 items
+                result = self._find_video_url_in_json(item, depth + 1)
+                if result:
+                    return result
+        
+        return None
+    
+    def is_videy_family(self, url: str) -> bool:
+        """Check if URL belongs to Videy/Videq family platforms"""
+        domain = urlparse(url).netloc.lower()
+        videy_domains = [
+            'videy', 'videq', 'vidgo', 'vidoy', 'vide-q', 'vide0', 'vide6',
+            'videypro', 'vidqy', 'vidbre', 'avdeq', 'vdaq', 'cdnvideq',
+            'videw', 'vidpy'
+        ]
+        return any(d in domain for d in videy_domains)
+    
     async def extract_all(self, url: str) -> Tuple[List[str], str]:
         """
         Main extraction method - tries all methods to find video URLs
         Returns (list of video URLs, resolved URL)
+        Like 9xbuddy, we try multiple methods and combine results
         """
         video_urls = []
         resolved_url = url
+        
+        # Check if this is a Videy family platform - use specialized extractor first
+        if self.is_videy_family(url):
+            print("[Extractor] Detected Videy family platform - using specialized extractor...")
+            try:
+                videy_urls = await self.extract_videy_family(url)
+                video_urls.extend(videy_urls)
+                if video_urls:
+                    cleaned = self._clean_video_urls(video_urls, url)
+                    if cleaned:
+                        print(f"[Extractor] Videy extractor found {len(cleaned)} URLs")
+                        return cleaned, url
+            except Exception as e:
+                print(f"[Extractor] Videy extractor failed: {e}")
         
         # Step 1: Try network interception (most reliable, like browser apps)
         print("[Extractor] Step 1: Network interception...")
@@ -603,13 +1193,13 @@ class UniversalVideoExtractor:
         except Exception as e:
             print(f"[Extractor] Network interception failed: {e}")
         
-        # Step 2: Try direct HTTP extraction if network interception found nothing
-        if not video_urls:
+        # Step 2: Try direct HTTP extraction if network interception found nothing or little
+        if len(video_urls) < 2:
             print("[Extractor] Step 2: Direct HTTP extraction...")
             try:
                 session = requests.Session()
                 headers = {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
                     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
                     'Accept-Language': 'en-US,en;q=0.9',
                     'Referer': url
@@ -620,6 +1210,11 @@ class UniversalVideoExtractor:
                 
                 html_urls = self.extract_from_html(resp.text, resolved_url)
                 video_urls.extend(html_urls)
+                
+                # Look for Videy CDN patterns specifically
+                for pattern in self.VIDEY_CDN_PATTERNS:
+                    matches = re.findall(pattern, resp.text, re.IGNORECASE)
+                    video_urls.extend(matches)
                 
                 # Follow iframes
                 soup = BeautifulSoup(resp.text, 'html.parser')
@@ -635,6 +1230,11 @@ class UniversalVideoExtractor:
                             iframe_resp = session.get(iframe_url, headers={**headers, 'Referer': resolved_url}, timeout=15)
                             iframe_urls = self.extract_from_html(iframe_resp.text, iframe_url)
                             video_urls.extend(iframe_urls)
+                            
+                            # Also check Videy patterns in iframe
+                            for pattern in self.VIDEY_CDN_PATTERNS:
+                                matches = re.findall(pattern, iframe_resp.text, re.IGNORECASE)
+                                video_urls.extend(matches)
                         except:
                             pass
                 
@@ -650,6 +1250,16 @@ class UniversalVideoExtractor:
                     video_urls.append(api_url)
             except Exception as e:
                 print(f"[Extractor] External APIs failed: {e}")
+        
+        # Step 4: Try Videy family extractor as last resort if still nothing
+        if not video_urls and not self.is_videy_family(url):
+            # Try it anyway - might be a similar platform
+            print("[Extractor] Step 4: Trying Videy-style extraction as fallback...")
+            try:
+                videy_urls = await self.extract_videy_family(url)
+                video_urls.extend(videy_urls)
+            except Exception as e:
+                print(f"[Extractor] Videy-style extraction failed: {e}")
         
         # Final cleanup
         video_urls = self._clean_video_urls(video_urls, resolved_url)
@@ -789,14 +1399,15 @@ db = UserDatabase(DATABASE_PATH)
 LANGUAGES = {
     'id': {
         'welcome': """
-🤖 *Selamat datang di SafeRobot v5.0!*
+🤖 *Selamat datang di SafeRobot v6.0!*
 
 Bot downloader UNIVERSAL seperti 9xbuddy.site!
 
-🔥 *FITUR BARU:*
+🔥 *FITUR BARU v6.0:*
 ✅ Download video dari WEBSITE APAPUN
 ✅ Network Interception (seperti browser app)
-✅ Ekstrak video otomatis dari player manapun
+✅ Ekstraksi khusus untuk Videy/Videq family
+✅ Multiple API fallbacks (cobalt, savefrom, dll)
 ✅ Auto-zip untuk folder/playlist
 
 📱 *SOSIAL MEDIA:*
@@ -804,7 +1415,7 @@ Bot downloader UNIVERSAL seperti 9xbuddy.site!
 ✅ YouTube, Facebook, Pinterest
 
 🎬 *STREAMING (100+ Platform):*
-✅ DoodStream, TeraBox, Videy, Videq
+✅ DoodStream, TeraBox, Videy, Videq, VidGo
 ✅ LuluStream, VidCloud, StreamTape
 ✅ MyVidPlay, Filemoon, StreamWish
 ✅ Dan masih banyak lagi!
@@ -918,14 +1529,15 @@ Silakan coba lagi atau hubungi admin.""",
     },
     'en': {
         'welcome': """
-🤖 *Welcome to SafeRobot v5.0!*
+🤖 *Welcome to SafeRobot v6.0!*
 
 UNIVERSAL downloader bot like 9xbuddy.site!
 
-🔥 *NEW FEATURES:*
+🔥 *NEW FEATURES v6.0:*
 ✅ Download video from ANY WEBSITE
 ✅ Network Interception (like browser apps)
-✅ Auto-extract video from any player
+✅ Specialized Videy/Videq family extractor
+✅ Multiple API fallbacks (cobalt, savefrom, etc)
 ✅ Auto-zip for folders/playlists
 
 📱 *SOCIAL MEDIA:*
@@ -933,7 +1545,7 @@ UNIVERSAL downloader bot like 9xbuddy.site!
 ✅ YouTube, Facebook, Pinterest
 
 🎬 *STREAMING (100+ Platforms):*
-✅ DoodStream, TeraBox, Videy, Videq
+✅ DoodStream, TeraBox, Videy, Videq, VidGo
 ✅ LuluStream, VidCloud, StreamTape
 ✅ MyVidPlay, Filemoon, StreamWish
 ✅ And many more!
@@ -1505,6 +2117,7 @@ class SafeRobot:
     
     async def extract_with_playwright(self, url):
         """Use universal extractor with network interception (like 9xbuddy)"""
+        video_urls = []
         try:
             # Use the universal extractor which has network interception
             video_urls = await universal_extractor.extract_with_network_interception(url)
@@ -1512,12 +2125,6 @@ class SafeRobot:
             return video_urls
         except Exception as e:
             print(f"[Playwright] Error: {e}")
-        finally:
-            if browser:
-                try:
-                    await browser.close()
-                except:
-                    pass
         
         return video_urls
     
@@ -2950,7 +3557,7 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     """Fungsi utama untuk menjalankan bot"""
     print("=" * 60)
-    print("🤖 SafeRobot v5.0 - Universal Video Downloader")
+    print("🤖 SafeRobot v6.0 - Universal Video Downloader")
     print("   Like 9xbuddy.site - Download from ANY website!")
     print("=" * 60)
     print()
