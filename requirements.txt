@@ -1,4 +1,4 @@
-# SafeRobot - Universal Media Downloader Bot
+# SafeRobot v5.0 - Universal Media Downloader Bot
 # Python 3.10+
 
 # Telegram Bot
@@ -13,5 +13,20 @@ aiohttp>=3.9.0
 # Browser Automation (untuk universal extraction seperti 9xbuddy)
 playwright>=1.40.0
 
-# Jangan lupa install browser setelah install playwright:
+# ============================================
+# INSTALLATION:
+# ============================================
+# pip install -r requirements.txt
 # playwright install chromium
+#
+# OPTIONAL: Install ffmpeg for HLS/m3u8 streams
+# apt-get install ffmpeg (Ubuntu/Debian)
+# brew install ffmpeg (macOS)
+# ============================================
+
+# Fitur v5.0:
+# - External API fallback (Cobalt API, dll)
+# - JavaScript unpacking untuk bypass proteksi
+# - Playwright dengan stealth mode
+# - Network request interception
+# - Folder to ZIP support
