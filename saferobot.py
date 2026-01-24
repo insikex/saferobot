@@ -7,9 +7,10 @@ import zipfile
 import tempfile
 import subprocess
 import shutil
+import base64
 from datetime import datetime, timedelta
-from typing import Optional, List, Dict, Any
-from urllib.parse import urlparse, urljoin, parse_qs
+from typing import Optional, List, Dict, Any, Tuple
+from urllib.parse import urlparse, urljoin, parse_qs, unquote
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from telegram.constants import ParseMode
@@ -43,7 +44,6 @@ def escape_markdown(text: str) -> str:
     """Escape karakter markdown untuk menghindari parse error"""
     if not text:
         return ""
-    # Escape karakter khusus markdown
     escape_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
     result = text
     for char in escape_chars:
@@ -54,7 +54,6 @@ def safe_title(title: str, max_length: int = 50) -> str:
     """Buat judul yang aman untuk ditampilkan"""
     if not title:
         return "Media"
-    # Hapus karakter berbahaya
     safe = re.sub(r'[<>:"/\\|?*]', '', title)
     safe = safe.strip()
     if len(safe) > max_length:
@@ -68,6 +67,247 @@ def get_unique_filename(base_path: str, extension: str) -> str:
     return f"{base_path}/{timestamp}_{random_hash}.{extension}"
 
 # ============================================
+# JAVASCRIPT UNPACKER
+# ============================================
+class JSUnpacker:
+    """
+    Unpacker untuk JavaScript yang di-obfuscate.
+    Banyak situs streaming menggunakan teknik packing untuk menyembunyikan URL video.
+    """
+    
+    @staticmethod
+    def detect_packed(source: str) -> bool:
+        """Deteksi apakah JavaScript menggunakan P.A.C.K.E.R packing"""
+        return bool(re.search(r"eval\(function\(p,a,c,k,e,(?:r|d)", source))
+    
+    @staticmethod
+    def unpack(source: str) -> str:
+        """Unpack JavaScript yang di-pack dengan P.A.C.K.E.R"""
+        try:
+            # Find the packed code
+            match = re.search(
+                r"}\('([^']+)',(\d+),(\d+),'([^']+)'\.split\('\|'\)",
+                source
+            )
+            if not match:
+                return source
+            
+            p, a, c, k = match.groups()
+            a, c = int(a), int(c)
+            k = k.split('|')
+            
+            # Base conversion
+            def base_convert(num: int, base: int) -> str:
+                result = ''
+                while num > 0:
+                    result = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"[num % base] + result
+                    num //= base
+                return result if result else '0'
+            
+            # Build replacement dictionary
+            replacements = {}
+            while c > 0:
+                c -= 1
+                key = base_convert(c, a) if c >= a else str(c)
+                if c < len(k) and k[c]:
+                    replacements[key] = k[c]
+                else:
+                    replacements[key] = key
+            
+            # Replace all words
+            def replace_word(match):
+                word = match.group(0)
+                return replacements.get(word, word)
+            
+            unpacked = re.sub(r'\b\w+\b', replace_word, p)
+            return unpacked
+        except Exception as e:
+            print(f"[JSUnpacker] Failed to unpack: {e}")
+            return source
+    
+    @staticmethod
+    def extract_urls_from_packed(source: str) -> List[str]:
+        """Extract all URLs from packed/unpacked JavaScript"""
+        urls = []
+        
+        # Unpack if needed
+        if JSUnpacker.detect_packed(source):
+            source = JSUnpacker.unpack(source)
+        
+        # Video URL patterns
+        patterns = [
+            r'(https?://[^\s<>"\'\\]+\.mp4[^\s<>"\'\\]*)',
+            r'(https?://[^\s<>"\'\\]+\.m3u8[^\s<>"\'\\]*)',
+            r'(https?://[^\s<>"\'\\]+\.webm[^\s<>"\'\\]*)',
+            r'(https?://[^\s<>"\'\\]+\.mpd[^\s<>"\'\\]*)',
+            r'["\']?(https?://[^\s<>"\'\\]*(?:video|stream|play|media|cdn)[^\s<>"\'\\]*)["\']?',
+            r'file\s*[=:]\s*["\']([^"\']+)["\']',
+            r'source\s*[=:]\s*["\']([^"\']+)["\']',
+            r'src\s*[=:]\s*["\']([^"\']+\.(?:mp4|m3u8|webm))["\']',
+        ]
+        
+        for pattern in patterns:
+            matches = re.findall(pattern, source, re.IGNORECASE)
+            for match in matches:
+                url = match if isinstance(match, str) else match[0]
+                url = url.replace('\\/', '/').replace('\\', '')
+                if url.startswith('http') and len(url) > 20:
+                    urls.append(url)
+        
+        return list(set(urls))
+
+# ============================================
+# EXTERNAL API DOWNLOADERS
+# ============================================
+class ExternalAPIDownloader:
+    """
+    Menggunakan API eksternal untuk download video.
+    Ini adalah cara yang digunakan oleh banyak website downloader.
+    """
+    
+    def __init__(self):
+        self.session = None
+        self.headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'application/json, text/plain, */*',
+            'Accept-Language': 'en-US,en;q=0.9',
+        }
+    
+    async def get_session(self):
+        if self.session is None or self.session.closed:
+            timeout = aiohttp.ClientTimeout(total=60)
+            self.session = aiohttp.ClientSession(timeout=timeout, headers=self.headers)
+        return self.session
+    
+    async def close_session(self):
+        if self.session and not self.session.closed:
+            await self.session.close()
+    
+    async def try_cobalt_api(self, url: str) -> Optional[Dict[str, Any]]:
+        """
+        Cobalt API - salah satu API terbaik untuk download video.
+        Mendukung banyak platform termasuk TikTok, YouTube, Twitter, dll.
+        """
+        try:
+            api_endpoints = [
+                'https://api.cobalt.tools/api/json',
+                'https://co.wuk.sh/api/json',
+            ]
+            
+            for endpoint in api_endpoints:
+                try:
+                    session = await self.get_session()
+                    payload = {
+                        'url': url,
+                        'vQuality': '1080',
+                        'filenamePattern': 'basic',
+                        'isAudioOnly': False,
+                        'isNoTTWatermark': True,
+                    }
+                    
+                    async with session.post(
+                        endpoint,
+                        json=payload,
+                        headers={
+                            **self.headers,
+                            'Content-Type': 'application/json',
+                            'Accept': 'application/json'
+                        },
+                        ssl=False
+                    ) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            if data.get('status') == 'stream' or data.get('status') == 'redirect':
+                                return {
+                                    'success': True,
+                                    'url': data.get('url'),
+                                    'filename': data.get('filename', 'video.mp4')
+                                }
+                            elif data.get('status') == 'picker':
+                                # Multiple options available
+                                picker = data.get('picker', [])
+                                if picker:
+                                    return {
+                                        'success': True,
+                                        'url': picker[0].get('url'),
+                                        'filename': 'video.mp4'
+                                    }
+                except Exception as e:
+                    print(f"[Cobalt] Endpoint {endpoint} failed: {e}")
+                    continue
+            
+            return None
+        except Exception as e:
+            print(f"[Cobalt API] Error: {e}")
+            return None
+    
+    async def try_saveform_api(self, url: str) -> Optional[Dict[str, Any]]:
+        """
+        SaveFrom-style API untuk berbagai platform
+        """
+        try:
+            session = await self.get_session()
+            
+            # Try different SaveFrom-style endpoints
+            endpoints = [
+                f'https://api.saveform.net/analysis?url={url}',
+            ]
+            
+            for endpoint in endpoints:
+                try:
+                    async with session.get(endpoint, ssl=False) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            if data.get('medias'):
+                                medias = data['medias']
+                                # Get best quality
+                                best = max(medias, key=lambda x: x.get('quality', 0), default=None)
+                                if best:
+                                    return {
+                                        'success': True,
+                                        'url': best.get('url'),
+                                        'filename': 'video.mp4'
+                                    }
+                except Exception as e:
+                    continue
+            
+            return None
+        except Exception as e:
+            print(f"[SaveForm API] Error: {e}")
+            return None
+    
+    async def try_allinonedownloader(self, url: str) -> Optional[Dict[str, Any]]:
+        """
+        AllInOne Downloader API
+        """
+        try:
+            session = await self.get_session()
+            
+            # Encode URL
+            encoded_url = base64.b64encode(url.encode()).decode()
+            
+            async with session.get(
+                f'https://alldownloader.net/wp-json/aio-dl/video-data/?url={url}',
+                ssl=False
+            ) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    if data.get('medias'):
+                        medias = data['medias']
+                        for media in medias:
+                            if media.get('url'):
+                                return {
+                                    'success': True,
+                                    'url': media['url'],
+                                    'filename': 'video.mp4'
+                                }
+            
+            return None
+        except Exception as e:
+            print(f"[AllInOne API] Error: {e}")
+            return None
+
+# ============================================
 # DATABASE MANAGEMENT
 # ============================================
 class UserDatabase:
@@ -76,7 +316,6 @@ class UserDatabase:
         self.load_database()
     
     def load_database(self):
-        """Load database dari file JSON"""
         if os.path.exists(self.db_path):
             with open(self.db_path, 'r', encoding='utf-8') as f:
                 self.data = json.load(f)
@@ -92,17 +331,14 @@ class UserDatabase:
             self.save_database()
     
     def save_database(self):
-        """Simpan database ke file JSON"""
         with open(self.db_path, 'w', encoding='utf-8') as f:
             json.dump(self.data, f, indent=2, ensure_ascii=False)
     
     def add_or_update_user(self, user_id, username, first_name, language_code):
-        """Tambah atau update user"""
         user_id_str = str(user_id)
         now = datetime.now().isoformat()
         
         if user_id_str not in self.data['users']:
-            # User baru
             self.data['users'][user_id_str] = {
                 'user_id': user_id,
                 'username': username,
@@ -116,7 +352,6 @@ class UserDatabase:
                 'audio_downloads': 0
             }
         else:
-            # Update user yang sudah ada
             self.data['users'][user_id_str]['last_active'] = now
             self.data['users'][user_id_str]['username'] = username
             self.data['users'][user_id_str]['first_name'] = first_name
@@ -124,7 +359,6 @@ class UserDatabase:
         self.save_database()
     
     def increment_download(self, user_id, download_type='video'):
-        """Increment download counter"""
         user_id_str = str(user_id)
         if user_id_str in self.data['users']:
             self.data['users'][user_id_str]['download_count'] += 1
@@ -141,10 +375,7 @@ class UserDatabase:
             self.save_database()
     
     def get_stats(self):
-        """Dapatkan statistik lengkap"""
         total_users = len(self.data['users'])
-        
-        # Hitung user aktif (aktif dalam 7 hari terakhir)
         now = datetime.now()
         active_threshold = now - timedelta(days=7)
         
@@ -178,7 +409,6 @@ class UserDatabase:
         }
     
     def get_top_users(self, limit=10):
-        """Dapatkan top users berdasarkan download"""
         sorted_users = sorted(
             self.data['users'].values(),
             key=lambda x: x['download_count'],
@@ -186,7 +416,6 @@ class UserDatabase:
         )
         return sorted_users[:limit]
 
-# Inisialisasi database
 db = UserDatabase(DATABASE_PATH)
 
 # ============================================
@@ -202,7 +431,14 @@ Bot downloader UNIVERSAL untuk:
 ✅ YouTube, Facebook, Pinterest
 ✅ Videy, VidPlay, StreamSB
 ✅ DoodStream, Upstream, MP4Upload
-✅ Dan SEMUA situs streaming lainnya!
+✅ Wilday, Vidgo, dan streaming sites lainnya!
+✅ SEMUA situs video apapun!
+
+🔥 Fitur BARU:
+• Advanced extraction seperti 9xbuddy
+• JavaScript unpacking untuk bypass proteksi
+• External API fallback
+• Folder to ZIP support
 
 🔥 Cara Penggunaan:
 Kirim link APAPUN dan bot akan otomatis mendeteksi & mendownload video!
@@ -217,7 +453,8 @@ SafeRobot adalah bot Telegram yang dapat mendownload konten dari HAMPIR SEMUA pl
 Fitur Utama:
 ⚡ Universal downloader - download dari link apapun
 🎯 Auto-detect platform
-🔒 Browser simulation untuk bypass proteksi
+🔒 JavaScript unpacking & deobfuscation
+🌐 Multiple API fallback
 📱 Support m3u8/HLS streams
 🗜️ Auto-zip untuk multiple files
 
@@ -227,14 +464,14 @@ Terima kasih telah menggunakan SafeRobot! 🙏
         'universal_detected': """🎬 Link streaming terdeteksi!
 
 ⚠️ Platform ini menggunakan proteksi khusus.
-Bot akan mencoba mengekstrak video...
+Bot akan mencoba berbagai metode ekstraksi...
 
 Pilih format download:""",
         'platform_detected': """🎬 Link dari {} terdeteksi!
 
 Pilih format download:""",
         'downloading': "⏳ Sedang mendownload {}...\nMohon tunggu sebentar...",
-        'extracting': "🔍 Mengekstrak video dari halaman...\nIni mungkin memerlukan waktu lebih lama...",
+        'extracting': "🔍 Mengekstrak video dari halaman...\nMencoba berbagai metode...",
         'sending': "📤 Mengirim file...",
         'video_caption': "🎥 {}\n\n🔥 Downloaded by @SafeRobot",
         'audio_caption': "🎵 {}\n\n🔥 Downloaded by @SafeRobot",
@@ -276,7 +513,14 @@ UNIVERSAL downloader bot for:
 ✅ YouTube, Facebook, Pinterest
 ✅ Videy, VidPlay, StreamSB
 ✅ DoodStream, Upstream, MP4Upload
-✅ And ALL other streaming sites!
+✅ Wilday, Vidgo, and other streaming sites!
+✅ ALL video sites!
+
+🔥 NEW Features:
+• Advanced extraction like 9xbuddy
+• JavaScript unpacking to bypass protection
+• External API fallback
+• Folder to ZIP support
 
 🔥 How to Use:
 Send ANY link and the bot will auto-detect & download the video!
@@ -291,7 +535,8 @@ SafeRobot is a Telegram bot that can download content from ALMOST ANY platform a
 Main Features:
 ⚡ Universal downloader - download from any link
 🎯 Auto-detect platform
-🔒 Browser simulation to bypass protection
+🔒 JavaScript unpacking & deobfuscation
+🌐 Multiple API fallback
 📱 Support m3u8/HLS streams
 🗜️ Auto-zip for multiple files
 
@@ -301,14 +546,14 @@ Thank you for using SafeRobot! 🙏
         'universal_detected': """🎬 Streaming link detected!
 
 ⚠️ This platform uses special protection.
-Bot will try to extract video...
+Bot will try various extraction methods...
 
 Choose download format:""",
         'platform_detected': """🎬 Link from {} detected!
 
 Choose download format:""",
         'downloading': "⏳ Downloading {}...\nPlease wait...",
-        'extracting': "🔍 Extracting video from page...\nThis might take longer...",
+        'extracting': "🔍 Extracting video from page...\nTrying various methods...",
         'sending': "📤 Sending file...",
         'video_caption': "🎥 {}\n\n🔥 Downloaded by @SafeRobot",
         'audio_caption': "🎵 {}\n\n🔥 Downloaded by @SafeRobot",
@@ -343,7 +588,6 @@ Please try again or contact admin.""",
 }
 
 def get_user_language(update: Update) -> str:
-    """Deteksi bahasa user dari Telegram settings"""
     try:
         user_lang = update.effective_user.language_code
         if user_lang and user_lang.lower().startswith('id'):
@@ -353,16 +597,13 @@ def get_user_language(update: Update) -> str:
         return 'en' 
 
 def get_text(update: Update, key: str) -> str:
-    """Ambil text sesuai bahasa user"""
     lang = get_user_language(update)
     return LANGUAGES[lang].get(key, LANGUAGES['en'].get(key, ''))
 
 def get_text_by_lang(lang: str, key: str) -> str:
-    """Ambil text berdasarkan kode bahasa"""
     return LANGUAGES.get(lang, LANGUAGES['en']).get(key, LANGUAGES['en'].get(key, ''))
 
 def get_main_keyboard(update: Update):
-    """Buat keyboard menu utama"""
     lang = get_user_language(update)
     keyboard = [
         [KeyboardButton(LANGUAGES[lang]['menu_about'])]
@@ -370,61 +611,61 @@ def get_main_keyboard(update: Update):
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
 def is_owner(user_id: int) -> bool:
-    """Check apakah user adalah owner"""
     return user_id == OWNER_ID
 
 # ============================================
-# UNIVERSAL VIDEO EXTRACTOR
+# UNIVERSAL VIDEO EXTRACTOR v5
 # ============================================
 class UniversalExtractor:
     """
     Universal video extractor yang bekerja seperti 9xbuddy.site
-    Menggunakan berbagai metode untuk mengekstrak video dari berbagai situs
+    Menggunakan berbagai metode untuk mengekstrak video dari berbagai situs:
+    1. yt-dlp untuk platform populer
+    2. External APIs (Cobalt, dll)
+    3. Playwright dengan network interception
+    4. JavaScript unpacking
+    5. Direct URL extraction
     """
     
-    # Pattern untuk mendeteksi URL video langsung
+    # Video URL patterns
     VIDEO_PATTERNS = [
-        r'(https?://[^\s<>"\']+\.mp4[^\s<>"\']*)',
-        r'(https?://[^\s<>"\']+\.m3u8[^\s<>"\']*)',
-        r'(https?://[^\s<>"\']+\.webm[^\s<>"\']*)',
-        r'(https?://[^\s<>"\']+\.mkv[^\s<>"\']*)',
-        r'(https?://[^\s<>"\']+\.avi[^\s<>"\']*)',
-        r'(https?://[^\s<>"\']+\.mov[^\s<>"\']*)',
-        r'(https?://[^\s<>"\']+\.flv[^\s<>"\']*)',
-        r'(https?://[^\s<>"\']+/video/[^\s<>"\']*)',
-        r'(https?://[^\s<>"\']+/v/[^\s<>"\']*)',
-        r'source[^>]*src=["\']([^"\']+\.mp4[^"\']*)["\']',
-        r'file["\']?\s*:\s*["\']([^"\']+\.mp4[^"\']*)["\']',
-        r'source["\']?\s*:\s*["\']([^"\']+)["\']',
-        r'video["\']?\s*:\s*["\']([^"\']+)["\']',
-        r'src["\']?\s*:\s*["\']([^"\']+\.mp4[^"\']*)["\']',
-        r'url["\']?\s*:\s*["\']([^"\']+\.mp4[^"\']*)["\']',
-        r'sources\s*:\s*\[\s*\{[^}]*["\']?file["\']?\s*:\s*["\']([^"\']+)["\']',
-        r'player\.src\s*\(\s*\{[^}]*["\']?src["\']?\s*:\s*["\']([^"\']+)["\']',
-        r'["\']?hls["\']?\s*:\s*["\']([^"\']+\.m3u8[^"\']*)["\']',
-        r'["\']?dash["\']?\s*:\s*["\']([^"\']+\.mpd[^"\']*)["\']',
+        r'(https?://[^\s<>"\'\\]+\.mp4(?:\?[^\s<>"\'\\]*)?)',
+        r'(https?://[^\s<>"\'\\]+\.m3u8(?:\?[^\s<>"\'\\]*)?)',
+        r'(https?://[^\s<>"\'\\]+\.webm(?:\?[^\s<>"\'\\]*)?)',
+        r'(https?://[^\s<>"\'\\]+\.mkv(?:\?[^\s<>"\'\\]*)?)',
+        r'(https?://[^\s<>"\'\\]+\.mpd(?:\?[^\s<>"\'\\]*)?)',
+        r'(https?://[^\s<>"\'\\]+\.ts(?:\?[^\s<>"\'\\]*)?)',
+        r'(?:file|source|src|url|video|stream)\s*[=:]\s*["\']([^"\']+\.(?:mp4|m3u8|webm)[^"\']*)["\']',
+        r'sources\s*:\s*\[\s*\{[^}]*["\']?(?:file|src|url)["\']?\s*:\s*["\']([^"\']+)["\']',
+        r'player\.src\s*\(\s*["\']([^"\']+)["\']',
+        r'["\']?(?:hls|dash|mp4)["\']?\s*:\s*["\']([^"\']+)["\']',
+        r'data-(?:src|video|stream)\s*=\s*["\']([^"\']+)["\']',
+        r'contentUrl["\']?\s*:\s*["\']([^"\']+)["\']',
     ]
     
-    # Platform streaming yang dikenal
+    # Streaming platforms
     STREAMING_PLATFORMS = {
         'videy': ['videy.co', 'videy.net'],
         'vidgo': ['vidgo.blog'],
+        'wilday': ['wilday.de'],
         'myvidplay': ['myvidplay.com'],
         'doodstream': ['doodstream.com', 'dood.to', 'dood.watch', 'dood.cx', 'dood.la', 'dood.pm', 'dood.so', 'dood.ws', 'dood.sh', 'dood.re', 'dood.wf', 'ds2play.com'],
         'streamsb': ['streamsb.net', 'streamsb.com', 'sbembed.com', 'sbplay.org', 'embedsb.com', 'pelistop.co', 'sbplay2.xyz', 'sbchill.com', 'streamsss.net', 'sbplay.one'],
         'upstream': ['upstream.to', 'upstreamcdn.co'],
         'mp4upload': ['mp4upload.com'],
         'vidoza': ['vidoza.net', 'vidoza.co'],
-        'mixdrop': ['mixdrop.co', 'mixdrop.to', 'mixdrop.ch'],
+        'mixdrop': ['mixdrop.co', 'mixdrop.to', 'mixdrop.ch', 'mixdrop.sx'],
         'streamtape': ['streamtape.com', 'streamtape.net', 'streamta.pe', 'strtape.cloud', 'strcloud.link'],
         'fembed': ['fembed.com', 'feurl.com', 'femax20.com', 'fcdn.stream', 'diasfem.com'],
-        'filemoon': ['filemoon.sx', 'filemoon.to'],
+        'filemoon': ['filemoon.sx', 'filemoon.to', 'filemoon.in'],
         'voe': ['voe.sx', 'voe.to'],
         'vtube': ['vtube.to', 'vtbe.to'],
-        'other_streaming': []  # Untuk platform tidak dikenal
+        'streamlare': ['streamlare.com'],
+        'supervideo': ['supervideo.tv'],
+        'other_streaming': []
     }
     
-    # Platform yang didukung yt-dlp dengan baik
+    # Platforms well-supported by yt-dlp
     YTDLP_PLATFORMS = {
         'tiktok': ['tiktok.com', 'vm.tiktok.com', 'vt.tiktok.com'],
         'instagram': ['instagram.com', 'instagr.am'],
@@ -436,13 +677,17 @@ class UniversalExtractor:
         'dailymotion': ['dailymotion.com', 'dai.ly'],
         'twitch': ['twitch.tv'],
         'reddit': ['reddit.com', 'redd.it'],
-        'bilibili': ['bilibili.com', 'b23.tv']
+        'bilibili': ['bilibili.com', 'b23.tv'],
+        'pornhub': ['pornhub.com'],
+        'xvideos': ['xvideos.com'],
+        'xnxx': ['xnxx.com'],
     }
     
     def __init__(self):
         self.session = None
+        self.external_api = ExternalAPIDownloader()
         self.headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.9,id;q=0.8',
             'Accept-Encoding': 'gzip, deflate, br',
@@ -452,51 +697,73 @@ class UniversalExtractor:
             'Sec-Fetch-Mode': 'navigate',
             'Sec-Fetch-Site': 'none',
             'Sec-Fetch-User': '?1',
-            'Cache-Control': 'max-age=0'
+            'Cache-Control': 'max-age=0',
+            'sec-ch-ua': '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': '"Windows"'
         }
     
-    def detect_platform(self, url: str) -> tuple:
+    def detect_platform(self, url: str) -> Tuple[str, bool]:
         """Deteksi platform dari URL, return (platform_name, is_streaming)"""
         try:
             domain = urlparse(url).netloc.lower()
             domain = domain.replace('www.', '')
             
-            # Cek platform yt-dlp
             for platform, domains in self.YTDLP_PLATFORMS.items():
                 if any(d in domain for d in domains):
                     return (platform.upper(), False)
             
-            # Cek platform streaming
             for platform, domains in self.STREAMING_PLATFORMS.items():
                 if any(d in domain for d in domains):
                     return (platform.upper(), True)
             
-            # Platform tidak dikenal - coba sebagai streaming
             return ('OTHER_STREAMING', True)
         except:
             return ('UNKNOWN', True)
     
     async def get_session(self):
-        """Get or create aiohttp session"""
         if self.session is None or self.session.closed:
             timeout = aiohttp.ClientTimeout(total=60)
-            self.session = aiohttp.ClientSession(timeout=timeout, headers=self.headers)
+            connector = aiohttp.TCPConnector(ssl=False, limit=10)
+            self.session = aiohttp.ClientSession(
+                timeout=timeout, 
+                headers=self.headers,
+                connector=connector
+            )
         return self.session
     
     async def close_session(self):
-        """Close aiohttp session"""
         if self.session and not self.session.closed:
             await self.session.close()
+        await self.external_api.close_session()
+    
+    async def fetch_page(self, url: str) -> Optional[str]:
+        """Fetch HTML page content"""
+        try:
+            session = await self.get_session()
+            async with session.get(url, allow_redirects=True) as response:
+                if response.status == 200:
+                    return await response.text()
+                return None
+        except Exception as e:
+            print(f"[Fetch Error] {e}")
+            return None
     
     async def extract_video_urls_from_html(self, html: str, base_url: str) -> List[str]:
-        """Extract video URLs dari HTML page"""
+        """Extract video URLs dari HTML page dengan JS unpacking"""
         video_urls = []
         
+        # Extract dari packed JavaScript
+        packed_urls = JSUnpacker.extract_urls_from_packed(html)
+        video_urls.extend(packed_urls)
+        
+        # Extract dengan patterns
         for pattern in self.VIDEO_PATTERNS:
-            matches = re.findall(pattern, html, re.IGNORECASE)
+            matches = re.findall(pattern, html, re.IGNORECASE | re.DOTALL)
             for match in matches:
                 url = match if isinstance(match, str) else match[0]
-                # Make absolute URL
+                url = url.replace('\\/', '/').replace('\\', '')
+                
                 if url.startswith('//'):
                     url = 'https:' + url
                 elif url.startswith('/'):
@@ -505,16 +772,16 @@ class UniversalExtractor:
                 elif not url.startswith('http'):
                     url = urljoin(base_url, url)
                 
-                # Validate URL
                 if self._is_valid_video_url(url):
                     video_urls.append(url)
         
-        # Remove duplicates while preserving order
+        # Remove duplicates
         seen = set()
         unique_urls = []
         for url in video_urls:
-            if url not in seen:
-                seen.add(url)
+            url_clean = url.split('?')[0]
+            if url_clean not in seen and len(url) > 20:
+                seen.add(url_clean)
                 unique_urls.append(url)
         
         return unique_urls
@@ -526,41 +793,30 @@ class UniversalExtractor:
             if not parsed.scheme or not parsed.netloc:
                 return False
             
-            # Ekstensi video yang valid
-            video_extensions = ['.mp4', '.m3u8', '.webm', '.mkv', '.avi', '.mov', '.flv', '.mpd']
+            # Skip tracking/analytics
+            skip_domains = ['google', 'facebook', 'analytics', 'doubleclick', 'adsense', 'tracker', 'pixel']
+            if any(skip in parsed.netloc.lower() for skip in skip_domains):
+                return False
+            
+            video_extensions = ['.mp4', '.m3u8', '.webm', '.mkv', '.avi', '.mov', '.flv', '.mpd', '.ts']
             path_lower = parsed.path.lower()
             
-            # Check if path contains video extension
             if any(ext in path_lower for ext in video_extensions):
                 return True
             
-            # Check for video-related paths
-            video_paths = ['/video', '/v/', '/stream', '/play', '/embed', '/media', '/hls/', '/dash/']
+            video_paths = ['/video', '/v/', '/stream', '/play', '/embed', '/media', '/hls/', '/dash/', '/cdn/']
             if any(vp in path_lower for vp in video_paths):
                 return True
             
-            # Check query parameters
-            if 'video' in url.lower() or 'stream' in url.lower():
+            if 'video' in url.lower() or 'stream' in url.lower() or 'media' in url.lower():
                 return True
             
             return False
         except:
             return False
     
-    async def fetch_page(self, url: str) -> Optional[str]:
-        """Fetch HTML page content"""
-        try:
-            session = await self.get_session()
-            async with session.get(url, ssl=False) as response:
-                if response.status == 200:
-                    return await response.text()
-                return None
-        except Exception as e:
-            print(f"[Fetch Error] {e}")
-            return None
-    
     async def download_with_ytdlp(self, url: str, format_type: str = 'video') -> Dict[str, Any]:
-        """Download menggunakan yt-dlp dengan opsi yang dioptimalkan"""
+        """Download menggunakan yt-dlp"""
         try:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             random_hash = hashlib.md5(str(datetime.now().timestamp()).encode()).hexdigest()[:8]
@@ -575,20 +831,11 @@ class UniversalExtractor:
                 'retries': 5,
                 'fragment_retries': 5,
                 'http_headers': self.headers,
-                'extractor_args': {
-                    'youtube': {
-                        'player_client': ['android', 'web'],
-                    }
-                },
-                # Support untuk berbagai situs
-                'allow_unplayable_formats': False,
-                'check_formats': False,
                 'geo_bypass': True,
                 'nocheckcertificate': True,
-                # Handling untuk age-restricted content
-                'age_limit': None,
-                # Cookie handling untuk situs yang memerlukan login
-                'cookiesfrombrowser': None,
+                'extractor_args': {
+                    'youtube': {'player_client': ['android', 'web']},
+                },
             }
             
             if format_type == 'audio':
@@ -601,13 +848,11 @@ class UniversalExtractor:
                     }],
                 })
             else:
-                # Format priority untuk video
                 ydl_opts.update({
                     'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/bestvideo+bestaudio/best',
                     'merge_output_format': 'mp4',
                 })
             
-            # Run yt-dlp in executor to avoid blocking
             loop = asyncio.get_event_loop()
             
             def download():
@@ -618,9 +863,7 @@ class UniversalExtractor:
                         filename = ydl.prepare_filename(info).rsplit('.', 1)[0] + '.mp3'
                     else:
                         filename = ydl.prepare_filename(info)
-                        # Handle merged output
                         if not os.path.exists(filename):
-                            # Cari file dengan nama serupa
                             base = filename.rsplit('.', 1)[0]
                             for ext in ['mp4', 'mkv', 'webm']:
                                 test_file = f"{base}.{ext}"
@@ -640,7 +883,6 @@ class UniversalExtractor:
             
         except Exception as e:
             error_msg = str(e)
-            # Clean up error message
             if 'is not a valid URL' in error_msg:
                 error_msg = 'Invalid URL'
             elif 'Video unavailable' in error_msg:
@@ -648,20 +890,15 @@ class UniversalExtractor:
             elif 'Unsupported URL' in error_msg:
                 error_msg = 'Platform not supported by yt-dlp'
             
-            return {
-                'success': False,
-                'error': error_msg
-            }
+            return {'success': False, 'error': error_msg}
     
     async def download_direct_url(self, url: str, format_type: str = 'video') -> Dict[str, Any]:
-        """Download dari direct URL dengan streaming untuk file besar"""
+        """Download dari direct URL"""
         try:
-            # Determine extension
             parsed = urlparse(url)
             path_lower = parsed.path.lower()
             
             if '.m3u8' in path_lower or '.m3u8' in url.lower():
-                # HLS stream - use ffmpeg
                 return await self.download_hls_stream(url, format_type)
             
             extension = 'mp4'
@@ -674,23 +911,28 @@ class UniversalExtractor:
             
             filename = get_unique_filename(DOWNLOAD_PATH, extension)
             
-            # Create new session with longer timeout for large files
             timeout = aiohttp.ClientTimeout(total=300, connect=30)
+            connector = aiohttp.TCPConnector(ssl=False)
             
-            async with aiohttp.ClientSession(timeout=timeout, headers=self.headers) as session:
-                async with session.get(url, ssl=False) as response:
+            # Use referer from the same domain
+            download_headers = {
+                **self.headers,
+                'Referer': f"{parsed.scheme}://{parsed.netloc}/",
+                'Origin': f"{parsed.scheme}://{parsed.netloc}"
+            }
+            
+            async with aiohttp.ClientSession(timeout=timeout, headers=download_headers, connector=connector) as session:
+                async with session.get(url, allow_redirects=True) as response:
                     if response.status == 200:
-                        # Stream download untuk file besar
                         content_length = int(response.headers.get('content-length', 0))
-                        print(f"[Download] Downloading {content_length} bytes...")
+                        print(f"[Download] Downloading {content_length} bytes from {url[:80]}...")
                         
                         with open(filename, 'wb') as f:
                             downloaded = 0
-                            async for chunk in response.content.iter_chunked(1024 * 1024):  # 1MB chunks
+                            async for chunk in response.content.iter_chunked(1024 * 1024):
                                 f.write(chunk)
                                 downloaded += len(chunk)
                         
-                        # Verify file
                         if os.path.exists(filename) and os.path.getsize(filename) > 0:
                             # Convert .ts to .mp4 if needed
                             if extension == 'ts':
@@ -698,12 +940,12 @@ class UniversalExtractor:
                                 try:
                                     process = await asyncio.create_subprocess_exec(
                                         'ffmpeg', '-y', '-i', filename,
-                                        '-c', 'copy', mp4_filename,
+                                        '-c', 'copy', '-bsf:a', 'aac_adtstoasc', mp4_filename,
                                         stdout=asyncio.subprocess.PIPE,
                                         stderr=asyncio.subprocess.PIPE
                                     )
                                     await process.communicate()
-                                    if os.path.exists(mp4_filename):
+                                    if os.path.exists(mp4_filename) and os.path.getsize(mp4_filename) > 0:
                                         os.remove(filename)
                                         filename = mp4_filename
                                 except Exception:
@@ -716,35 +958,19 @@ class UniversalExtractor:
                                 'duration': 0
                             }
                         else:
-                            return {
-                                'success': False,
-                                'error': 'Downloaded file is empty'
-                            }
+                            return {'success': False, 'error': 'Downloaded file is empty'}
+                    
                     elif response.status == 403:
-                        return {
-                            'success': False,
-                            'error': 'Access forbidden - video is protected'
-                        }
+                        return {'success': False, 'error': 'Access forbidden - video is protected'}
                     elif response.status == 404:
-                        return {
-                            'success': False,
-                            'error': 'Video not found'
-                        }
+                        return {'success': False, 'error': 'Video not found'}
                     else:
-                        return {
-                            'success': False,
-                            'error': f'HTTP {response.status}'
-                        }
+                        return {'success': False, 'error': f'HTTP {response.status}'}
+                        
         except asyncio.TimeoutError:
-            return {
-                'success': False,
-                'error': 'Download timeout - file too large or slow connection'
-            }
+            return {'success': False, 'error': 'Download timeout - file too large or slow connection'}
         except Exception as e:
-            return {
-                'success': False,
-                'error': str(e)
-            }
+            return {'success': False, 'error': str(e)}
     
     async def download_hls_stream(self, m3u8_url: str, format_type: str = 'video') -> Dict[str, Any]:
         """Download HLS/m3u8 stream menggunakan ffmpeg"""
@@ -754,16 +980,21 @@ class UniversalExtractor:
                 ffmpeg_opts = ['-vn', '-acodec', 'libmp3lame', '-q:a', '2']
             else:
                 extension = 'mp4'
-                ffmpeg_opts = ['-c', 'copy']
+                ffmpeg_opts = ['-c', 'copy', '-bsf:a', 'aac_adtstoasc']
             
             filename = get_unique_filename(DOWNLOAD_PATH, extension)
+            
+            # Get referer from URL
+            parsed = urlparse(m3u8_url)
+            referer = f"{parsed.scheme}://{parsed.netloc}/"
             
             cmd = [
                 'ffmpeg',
                 '-y',
+                '-headers', f'User-Agent: {self.headers["User-Agent"]}\r\nReferer: {referer}\r\n',
                 '-i', m3u8_url,
-                '-headers', f'User-Agent: {self.headers["User-Agent"]}\r\n',
                 *ffmpeg_opts,
+                '-movflags', '+faststart',
                 filename
             ]
             
@@ -773,7 +1004,7 @@ class UniversalExtractor:
                 stderr=asyncio.subprocess.PIPE
             )
             
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=300)
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=600)
             
             if process.returncode == 0 and os.path.exists(filename) and os.path.getsize(filename) > 0:
                 return {
@@ -783,26 +1014,18 @@ class UniversalExtractor:
                     'duration': 0
                 }
             else:
-                return {
-                    'success': False,
-                    'error': 'FFmpeg failed to download stream'
-                }
+                stderr_text = stderr.decode()[:200] if stderr else 'Unknown error'
+                return {'success': False, 'error': f'FFmpeg failed: {stderr_text}'}
+                
         except asyncio.TimeoutError:
-            return {
-                'success': False,
-                'error': 'Download timeout'
-            }
+            return {'success': False, 'error': 'HLS download timeout'}
         except Exception as e:
-            return {
-                'success': False,
-                'error': str(e)
-            }
+            return {'success': False, 'error': str(e)}
     
     async def extract_with_playwright(self, url: str, format_type: str = 'video') -> Dict[str, Any]:
         """
-        Extract video menggunakan Playwright browser automation.
-        Ini adalah metode yang sama yang digunakan oleh 9xbuddy.site
-        untuk menangkap video dari website apapun.
+        Extract video menggunakan Playwright dengan network interception.
+        Ini adalah teknik yang sama digunakan browser apps untuk menangkap video.
         """
         if not PLAYWRIGHT_AVAILABLE:
             return {'success': False, 'error': 'Playwright not available'}
@@ -813,7 +1036,7 @@ class UniversalExtractor:
             print(f"[Playwright] Starting browser for: {url}")
             
             async with async_playwright() as p:
-                # Launch browser with stealth settings
+                # Launch dengan stealth settings
                 browser = await p.chromium.launch(
                     headless=True,
                     args=[
@@ -824,27 +1047,66 @@ class UniversalExtractor:
                         '--no-first-run',
                         '--no-zygote',
                         '--disable-gpu',
-                        '--disable-blink-features=AutomationControlled'
+                        '--disable-blink-features=AutomationControlled',
+                        '--disable-infobars',
+                        '--window-size=1920,1080',
+                        '--disable-extensions',
                     ]
                 )
                 
                 context = await browser.new_context(
-                    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
                     viewport={'width': 1920, 'height': 1080},
                     java_script_enabled=True,
                     bypass_csp=True,
-                    ignore_https_errors=True
+                    ignore_https_errors=True,
+                    locale='en-US',
+                    timezone_id='America/New_York',
                 )
+                
+                # Inject stealth scripts
+                await context.add_init_script("""
+                    // Webdriver property
+                    Object.defineProperty(navigator, 'webdriver', {
+                        get: () => undefined
+                    });
+                    
+                    // Languages
+                    Object.defineProperty(navigator, 'languages', {
+                        get: () => ['en-US', 'en']
+                    });
+                    
+                    // Plugins
+                    Object.defineProperty(navigator, 'plugins', {
+                        get: () => [1, 2, 3, 4, 5]
+                    });
+                    
+                    // Chrome runtime
+                    window.chrome = {
+                        runtime: {}
+                    };
+                    
+                    // Permissions
+                    const originalQuery = window.navigator.permissions.query;
+                    window.navigator.permissions.query = (parameters) => (
+                        parameters.name === 'notifications' ?
+                            Promise.resolve({ state: Notification.permission }) :
+                            originalQuery(parameters)
+                    );
+                """)
                 
                 page = await context.new_page()
                 
-                # Intercept network requests
+                # Intercept ALL network requests
+                async def handle_request(route, request):
+                    await route.continue_()
+                
                 async def handle_response(response):
                     try:
                         response_url = response.url
                         content_type = response.headers.get('content-type', '')
                         
-                        # Capture video URLs
+                        # Check if it's a video
                         is_video = (
                             '.mp4' in response_url.lower() or
                             '.m3u8' in response_url.lower() or
@@ -853,106 +1115,135 @@ class UniversalExtractor:
                             '.mpd' in response_url.lower() or
                             'video' in content_type.lower() or
                             'mpegurl' in content_type.lower() or
+                            'octet-stream' in content_type.lower() or
                             '/video/' in response_url.lower() or
                             '/stream/' in response_url.lower() or
-                            '/hls/' in response_url.lower()
+                            '/hls/' in response_url.lower() or
+                            '/media/' in response_url.lower() or
+                            '/cdn/' in response_url.lower()
                         )
                         
-                        if is_video and response.status == 200:
-                            # Filter out tracking/analytics
-                            skip_domains = ['google', 'facebook', 'analytics', 'doubleclick', 'adsense', 'tracker']
-                            if not any(skip in response_url.lower() for skip in skip_domains):
-                                print(f"[Playwright] Captured: {response_url[:100]}...")
-                                captured_urls.append({
-                                    'url': response_url,
-                                    'content_type': content_type,
-                                    'size': int(response.headers.get('content-length', 0))
-                                })
-                    except Exception as e:
+                        # Skip tracking
+                        skip_domains = ['google', 'facebook', 'analytics', 'doubleclick', 'adsense', 'tracker']
+                        should_skip = any(skip in response_url.lower() for skip in skip_domains)
+                        
+                        if is_video and response.status == 200 and not should_skip:
+                            content_length = int(response.headers.get('content-length', 0))
+                            print(f"[Playwright] Captured: {response_url[:80]}... (size: {content_length})")
+                            captured_urls.append({
+                                'url': response_url,
+                                'content_type': content_type,
+                                'size': content_length
+                            })
+                    except Exception:
                         pass
                 
                 page.on('response', handle_response)
                 
                 # Navigate to page
                 try:
-                    await page.goto(url, wait_until='networkidle', timeout=30000)
+                    await page.goto(url, wait_until='networkidle', timeout=45000)
                 except Exception:
-                    # Try with domcontentloaded if networkidle times out
                     try:
-                        await page.goto(url, wait_until='domcontentloaded', timeout=15000)
+                        await page.goto(url, wait_until='domcontentloaded', timeout=20000)
                     except Exception:
                         pass
                 
-                # Wait for video elements to load
-                await asyncio.sleep(3)
+                # Wait for video to load
+                await asyncio.sleep(5)
                 
-                # Try to click play button if exists
-                try:
-                    play_selectors = [
-                        'button[aria-label*="play"]',
-                        '.play-button',
-                        '.vjs-big-play-button',
-                        '.plyr__control--overlaid',
-                        '[class*="play"]',
-                        'video'
-                    ]
-                    for selector in play_selectors:
-                        try:
-                            element = await page.query_selector(selector)
-                            if element:
-                                await element.click()
-                                await asyncio.sleep(2)
-                                break
-                        except:
-                            continue
-                except:
-                    pass
+                # Try to click play button
+                play_selectors = [
+                    'button[aria-label*="play" i]',
+                    'button[aria-label*="Play" i]',
+                    '.play-button',
+                    '.vjs-big-play-button',
+                    '.plyr__control--overlaid',
+                    '[class*="play"]',
+                    '.jw-icon-playback',
+                    '.jw-icon-display',
+                    'video',
+                    '.video-js',
+                ]
                 
-                # Extract video source from page
+                for selector in play_selectors:
+                    try:
+                        element = await page.query_selector(selector)
+                        if element:
+                            await element.click()
+                            await asyncio.sleep(3)
+                            break
+                    except:
+                        continue
+                
+                # Extract from page scripts
                 video_sources = await page.evaluate('''() => {
                     const sources = [];
                     
-                    // Get all video elements
+                    // Video elements
                     document.querySelectorAll('video').forEach(video => {
                         if (video.src) sources.push(video.src);
                         if (video.currentSrc) sources.push(video.currentSrc);
-                        
                         video.querySelectorAll('source').forEach(source => {
                             if (source.src) sources.push(source.src);
                         });
                     });
                     
-                    // Get iframes that might contain video
+                    // Iframes
                     document.querySelectorAll('iframe').forEach(iframe => {
-                        if (iframe.src) sources.push(iframe.src);
+                        if (iframe.src && iframe.src.includes('embed')) {
+                            sources.push(iframe.src);
+                        }
                     });
                     
-                    // Search for video URLs in scripts
+                    // Search in all scripts for video URLs
                     document.querySelectorAll('script').forEach(script => {
                         const text = script.textContent || '';
                         const patterns = [
-                            /["']([^"']+\.m3u8[^"']*)['"]/gi,
-                            /["']([^"']+\.mp4[^"']*)['"]/gi,
-                            /source\s*:\s*["']([^"']+)['"]/gi,
-                            /file\s*:\s*["']([^"']+)['"]/gi,
-                            /src\s*:\s*["']([^"']+\.mp4[^"']*)['"]/gi
+                            /["']([^"']*\.m3u8[^"']*)['"]/gi,
+                            /["']([^"']*\.mp4[^"']*)['"]/gi,
+                            /source\s*[=:]\s*["']([^"']+)['"]/gi,
+                            /file\s*[=:]\s*["']([^"']+)['"]/gi,
+                            /src\s*[=:]\s*["']([^"']+\.(?:mp4|m3u8))['"]/gi,
+                            /url\s*[=:]\s*["']([^"']+\.(?:mp4|m3u8))['"]/gi,
+                            /hls\s*[=:]\s*["']([^"']+)['"]/gi,
+                            /dash\s*[=:]\s*["']([^"']+)['"]/gi,
+                            /video_url\s*[=:]\s*["']([^"']+)['"]/gi,
+                            /contentUrl['"]*\s*[=:]\s*["']([^"']+)['"]/gi,
                         ];
                         patterns.forEach(pattern => {
                             let match;
                             while ((match = pattern.exec(text)) !== null) {
-                                sources.push(match[1]);
+                                const url = match[1].replace(/\\\//g, '/');
+                                if (url.startsWith('http') || url.startsWith('//')) {
+                                    sources.push(url);
+                                }
                             }
                         });
+                    });
+                    
+                    // Check window/global variables
+                    const checkVars = ['source', 'videoUrl', 'video_url', 'file', 'src', 'streamUrl', 'hlsUrl', 'mp4Url'];
+                    checkVars.forEach(varName => {
+                        try {
+                            const value = window[varName];
+                            if (typeof value === 'string' && value.startsWith('http')) {
+                                sources.push(value);
+                            }
+                        } catch(e) {}
                     });
                     
                     return sources;
                 }''')
                 
-                # Add page-extracted sources to captured URLs
+                # Add extracted sources
                 for source in video_sources:
                     if source and ('mp4' in source.lower() or 'm3u8' in source.lower() or 'video' in source.lower()):
+                        url_clean = source.replace('\\/', '/')
+                        if url_clean.startswith('//'):
+                            url_clean = 'https:' + url_clean
                         captured_urls.append({
-                            'url': source,
+                            'url': url_clean,
                             'content_type': 'video/mp4' if 'mp4' in source.lower() else 'application/x-mpegURL',
                             'size': 0
                         })
@@ -968,27 +1259,30 @@ class UniversalExtractor:
             seen = set()
             unique_urls = []
             for item in captured_urls:
-                url_clean = item['url'].split('?')[0]  # Remove query params for dedup
+                url_clean = item['url'].split('?')[0]
                 if url_clean not in seen:
                     seen.add(url_clean)
                     unique_urls.append(item)
             
-            # Sort by priority: m3u8 > mp4 with size > mp4 without size
+            # Sort by priority
             def priority(item):
                 url = item['url'].lower()
+                size = item['size']
                 if '.m3u8' in url:
-                    return (0, item['size'])
+                    return (0, -size)
                 elif '.mp4' in url:
-                    return (1, -item['size'])
+                    return (1, -size)
+                elif 'video' in url or 'stream' in url:
+                    return (2, -size)
                 else:
-                    return (2, -item['size'])
+                    return (3, -size)
             
             unique_urls.sort(key=priority)
             
             # Try to download each URL
-            for item in unique_urls[:5]:  # Try top 5
+            for item in unique_urls[:8]:
                 video_url = item['url']
-                print(f"[Playwright] Trying to download: {video_url[:80]}...")
+                print(f"[Playwright] Trying: {video_url[:80]}...")
                 
                 if '.m3u8' in video_url.lower():
                     result = await self.download_hls_stream(video_url, format_type)
@@ -1004,108 +1298,84 @@ class UniversalExtractor:
             print(f"[Playwright Error] {e}")
             return {'success': False, 'error': str(e)}
     
-    async def extract_from_streaming_site(self, url: str, format_type: str = 'video') -> Dict[str, Any]:
-        """Extract video dari streaming site generik"""
-        try:
-            # Step 1: Try Playwright first for JS-heavy sites
-            if PLAYWRIGHT_AVAILABLE:
-                print(f"[Extractor] Trying Playwright extraction...")
-                result = await self.extract_with_playwright(url, format_type)
-                if result['success']:
-                    return result
-            
-            # Step 2: Fallback to HTML parsing
-            print(f"[Extractor] Falling back to HTML parsing...")
-            html = await self.fetch_page(url)
-            if not html:
-                return {
-                    'success': False,
-                    'error': 'Failed to fetch page'
-                }
-            
-            # Step 3: Extract video URLs
-            video_urls = await self.extract_video_urls_from_html(html, url)
-            
-            if not video_urls:
-                # Try with yt-dlp as fallback
-                return await self.download_with_ytdlp(url, format_type)
-            
-            # Step 4: Prioritas URL
-            # Prioritaskan m3u8, lalu mp4
-            m3u8_urls = [u for u in video_urls if '.m3u8' in u.lower()]
-            mp4_urls = [u for u in video_urls if '.mp4' in u.lower()]
-            
-            # Coba m3u8 dulu
-            for m3u8_url in m3u8_urls:
-                result = await self.download_hls_stream(m3u8_url, format_type)
-                if result['success']:
-                    return result
-            
-            # Coba mp4
-            for mp4_url in mp4_urls:
-                result = await self.download_direct_url(mp4_url, format_type)
-                if result['success']:
-                    return result
-            
-            # Coba semua URL lain
-            for video_url in video_urls:
-                if video_url not in m3u8_urls and video_url not in mp4_urls:
-                    result = await self.download_direct_url(video_url, format_type)
-                    if result['success']:
-                        return result
-            
-            # Fallback ke yt-dlp
-            return await self.download_with_ytdlp(url, format_type)
-            
-        except Exception as e:
-            return {
-                'success': False,
-                'error': str(e)
-            }
-    
     async def extract(self, url: str, format_type: str = 'video') -> Dict[str, Any]:
         """
         Main extraction method - mencoba berbagai metode secara berurutan:
-        1. yt-dlp untuk platform yang dikenal
-        2. Playwright browser automation untuk streaming sites
-        3. HTML parsing untuk fallback
-        4. Direct URL download jika ditemukan
+        1. External APIs (Cobalt, dll) - untuk platform populer
+        2. yt-dlp - untuk platform yang didukung
+        3. Playwright browser automation - untuk streaming sites
+        4. Direct HTML parsing dengan JS unpacking
         """
         platform, is_streaming = self.detect_platform(url)
         
-        print(f"[Extractor] Platform: {platform}, Is Streaming: {is_streaming}, Format: {format_type}")
+        print(f"\n{'='*50}")
+        print(f"[Extractor] Platform: {platform}, Is Streaming: {is_streaming}")
         print(f"[Extractor] URL: {url}")
+        print(f"{'='*50}\n")
         
         errors = []
         
-        # Method 1: yt-dlp untuk platform yang dikenal
+        # Method 1: Try External APIs first for popular platforms
         if not is_streaming:
-            print(f"[Extractor] Method 1: Trying yt-dlp...")
+            print(f"[Extractor] Method 1: Trying External APIs...")
+            api_result = await self.external_api.try_cobalt_api(url)
+            if api_result and api_result.get('success'):
+                print(f"[Extractor] Cobalt API succeeded, downloading...")
+                download_result = await self.download_direct_url(api_result['url'], format_type)
+                if download_result['success']:
+                    return download_result
+                errors.append(f"Cobalt download: {download_result.get('error', 'Failed')}")
+        
+        # Method 2: yt-dlp for known platforms
+        if not is_streaming or platform in ['YOUTUBE', 'TWITTER', 'INSTAGRAM', 'TIKTOK', 'FACEBOOK']:
+            print(f"[Extractor] Method 2: Trying yt-dlp...")
             result = await self.download_with_ytdlp(url, format_type)
             if result['success']:
                 print(f"[Extractor] yt-dlp succeeded!")
                 return result
             errors.append(f"yt-dlp: {result.get('error', 'Unknown error')}")
         
-        # Method 2: Streaming site extraction (Playwright + HTML parsing)
-        print(f"[Extractor] Method 2: Trying streaming extraction...")
-        result = await self.extract_from_streaming_site(url, format_type)
-        if result['success']:
-            print(f"[Extractor] Streaming extraction succeeded!")
-            return result
-        errors.append(f"Streaming: {result.get('error', 'Unknown error')}")
+        # Method 3: Playwright browser automation
+        if PLAYWRIGHT_AVAILABLE:
+            print(f"[Extractor] Method 3: Trying Playwright browser extraction...")
+            result = await self.extract_with_playwright(url, format_type)
+            if result['success']:
+                print(f"[Extractor] Playwright succeeded!")
+                return result
+            errors.append(f"Playwright: {result.get('error', 'Unknown error')}")
         
-        # Method 3: Fallback yt-dlp dengan opsi berbeda
+        # Method 4: Direct HTML parsing with JS unpacking
+        print(f"[Extractor] Method 4: Trying HTML parsing with JS unpacking...")
+        html = await self.fetch_page(url)
+        if html:
+            video_urls = await self.extract_video_urls_from_html(html, url)
+            print(f"[Extractor] Found {len(video_urls)} video URLs from HTML")
+            
+            for video_url in video_urls[:10]:
+                print(f"[Extractor] Trying: {video_url[:80]}...")
+                if '.m3u8' in video_url.lower():
+                    result = await self.download_hls_stream(video_url, format_type)
+                else:
+                    result = await self.download_direct_url(video_url, format_type)
+                
+                if result['success']:
+                    print(f"[Extractor] Direct URL download succeeded!")
+                    return result
+            
+            errors.append("HTML parsing: No working video URLs found")
+        else:
+            errors.append("HTML parsing: Failed to fetch page")
+        
+        # Method 5: Final yt-dlp fallback
         if is_streaming:
-            print(f"[Extractor] Method 3: Final yt-dlp fallback...")
+            print(f"[Extractor] Method 5: Final yt-dlp fallback...")
             result = await self.download_with_ytdlp(url, format_type)
             if result['success']:
-                print(f"[Extractor] yt-dlp fallback succeeded!")
                 return result
             errors.append(f"yt-dlp fallback: {result.get('error', 'Unknown error')}")
         
         # All methods failed
-        combined_error = " | ".join(errors[-2:])  # Show last 2 errors
+        combined_error = " | ".join(errors[-3:])
         return {
             'success': False,
             'error': f"Semua metode gagal: {combined_error}"
@@ -1153,7 +1423,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler untuk command /start"""
     user = update.effective_user
     
-    # Simpan/update user ke database
     db.add_or_update_user(
         user.id,
         user.username,
@@ -1204,7 +1473,6 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     stats_msg += "\n━━━━━━━━━━━━━━━━━━━━"
     
-    # Keyboard untuk refresh
     keyboard = [[InlineKeyboardButton("🔄 Refresh", callback_data="refresh_stats")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -1246,7 +1514,7 @@ async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 text=f"📢 BROADCAST MESSAGE\n\n{message}"
             )
             success += 1
-            await asyncio.sleep(0.05)  # Delay untuk menghindari rate limit
+            await asyncio.sleep(0.05)
         except Exception as e:
             failed += 1
             print(f"Failed to send to {user_id_str}: {e}")
@@ -1257,13 +1525,54 @@ async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"❌ Gagal: {failed}"
     )
 
+async def zip_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handler untuk command /zip - ZIP folder downloads"""
+    user_id = update.effective_user.id
+    
+    if not is_owner(user_id):
+        await update.message.reply_text("❌ Perintah ini hanya untuk owner bot!")
+        return
+    
+    # Check if downloads folder has files
+    files = [f for f in os.listdir(DOWNLOAD_PATH) if os.path.isfile(os.path.join(DOWNLOAD_PATH, f))]
+    
+    if not files:
+        await update.message.reply_text("📁 Folder downloads kosong!")
+        return
+    
+    status_msg = await update.message.reply_text(f"🗜️ Membuat ZIP dari {len(files)} file...")
+    
+    try:
+        zip_path = await create_zip_from_folder(DOWNLOAD_PATH)
+        
+        file_size = os.path.getsize(zip_path)
+        max_size = 50 * 1024 * 1024  # 50MB
+        
+        if file_size > max_size:
+            await status_msg.edit_text(f"❌ File ZIP terlalu besar ({file_size / 1024 / 1024:.1f}MB)!\nMaksimal 50MB untuk Telegram.")
+            os.remove(zip_path)
+            return
+        
+        await status_msg.edit_text("📤 Mengirim file ZIP...")
+        
+        with open(zip_path, 'rb') as f:
+            await update.message.reply_document(
+                document=f,
+                caption=f"📦 Downloads Archive\n{len(files)} files\nSize: {file_size / 1024 / 1024:.1f}MB"
+            )
+        
+        await status_msg.delete()
+        os.remove(zip_path)
+        
+    except Exception as e:
+        await status_msg.edit_text(f"❌ Error: {str(e)[:100]}")
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler untuk semua pesan text"""
     user = update.effective_user
     text = update.message.text.strip()
     lang = get_user_language(update)
     
-    # Update user activity
     db.add_or_update_user(
         user.id,
         user.username,
@@ -1300,7 +1609,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = text
     platform, is_streaming = extractor.detect_platform(url)
     
-    # Store URL
     url_id = str(hash(url))[-8:]
     context.user_data[url_id] = {
         'url': url,
@@ -1308,7 +1616,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'is_streaming': is_streaming
     }
     
-    # Create download buttons
     keyboard = [
         [
             InlineKeyboardButton(
@@ -1330,7 +1637,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    # Pesan sesuai platform
     if is_streaming:
         detected_msg = f"🎬 Link streaming dari {platform} terdeteksi!\n\n⚠️ Platform streaming mungkin memerlukan waktu lebih lama.\n\nPilih format download:"
     else:
@@ -1407,19 +1713,17 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     platform = url_data['platform']
     is_streaming = url_data['is_streaming']
     
-    # Tentukan format type
     if format_code == 'v':
         format_type = 'video'
     elif format_code == 'a':
         format_type = 'audio'
     elif format_code == 'd':
-        format_type = 'video'  # Direct download as video
+        format_type = 'video'
     else:
         format_type = 'video'
     
-    # Status message
     if is_streaming:
-        status_text = f"🔍 Mengekstrak video dari {platform}...\n⏳ Ini mungkin memerlukan waktu lebih lama..."
+        status_text = f"🔍 Mengekstrak video dari {platform}...\n\n⏳ Mencoba berbagai metode:\n1️⃣ External APIs\n2️⃣ yt-dlp\n3️⃣ Browser extraction\n4️⃣ HTML parsing\n\nMohon tunggu..."
     else:
         format_name = 'video' if format_type == 'video' else 'audio'
         status_text = f"⏳ Sedang mendownload {format_name}...\nMohon tunggu sebentar..."
@@ -1427,7 +1731,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     status_msg = await query.message.reply_text(status_text)
     
     try:
-        # Download menggunakan universal extractor
         result = await extractor.extract(url, format_type)
         
         if result['success']:
@@ -1436,14 +1739,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             filepath = result['filepath']
             title = safe_title(result.get('title', 'Media'))
             
-            # Cek apakah file ada
             if not os.path.exists(filepath):
                 await status_msg.edit_text("❌ File tidak ditemukan setelah download!")
                 return
             
-            # Cek ukuran file
             file_size = os.path.getsize(filepath)
-            max_size = 50 * 1024 * 1024  # 50MB limit Telegram
+            max_size = 50 * 1024 * 1024
             
             if file_size == 0:
                 await status_msg.edit_text("❌ File kosong! Video mungkin diproteksi.")
@@ -1451,13 +1752,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     os.remove(filepath)
                 return
             
-            # Buat caption sederhana tanpa markdown
             if format_type == 'audio':
                 caption = f"🎵 {title}\n\n🔥 Downloaded by @SafeRobot"
             else:
                 caption = f"🎥 {title}\n\n🔥 Downloaded by @SafeRobot"
             
-            # Kirim file
             try:
                 if format_type == 'audio':
                     with open(filepath, 'rb') as audio:
@@ -1491,14 +1790,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                     caption=caption + "\n\n📎 Dikirim sebagai document."
                                 )
                 
-                # Increment download counter
                 db.increment_download(query.from_user.id, format_type)
-                
                 await status_msg.delete()
                 
             except Exception as send_error:
                 print(f"Send error: {send_error}")
-                # Coba kirim sebagai document
                 try:
                     with open(filepath, 'rb') as document:
                         await query.message.reply_document(
@@ -1510,7 +1806,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 except Exception as doc_error:
                     await status_msg.edit_text(f"❌ Gagal mengirim file: {str(doc_error)[:100]}")
             
-            # Cleanup
             if os.path.exists(filepath):
                 os.remove(filepath)
             
@@ -1519,11 +1814,10 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         else:
             error_text = result.get('error', 'Unknown error')
-            # Truncate long errors
-            if len(error_text) > 200:
-                error_text = error_text[:200] + "..."
+            if len(error_text) > 300:
+                error_text = error_text[:300] + "..."
             
-            error_msg = f"❌ Download gagal!\n\nError: {error_text}\n\nTips:\n• Pastikan link dapat diakses\n• Coba kirim link lagi\n• Hubungi admin jika masalah berlanjut"
+            error_msg = f"❌ Download gagal!\n\nError: {error_text}\n\nTips:\n• Pastikan link dapat diakses\n• Beberapa situs memiliki proteksi yang kuat\n• Coba kirim link lagi\n• Hubungi admin jika masalah berlanjut"
             await status_msg.edit_text(error_msg)
     
     except Exception as e:
@@ -1546,12 +1840,16 @@ async def cleanup_on_shutdown():
 
 def main():
     """Fungsi utama untuk menjalankan bot"""
-    print("🤖 SafeRobot v4.0 - Universal Downloader Starting...")
+    print("🤖 SafeRobot v5.0 - Universal Downloader Starting...")
     print("🌐 Multi-language support: ID/EN")
     print("🎬 Universal video extraction enabled")
-    print("📊 Owner stats & database enabled")
+    print("🔧 Features:")
+    print("   • External API fallback (Cobalt, etc)")
+    print("   • JavaScript unpacking/deobfuscation")
+    print("   • Playwright browser automation")
+    print("   • Network request interception")
+    print("   • ZIP folder support")
     print(f"👑 Owner ID: {OWNER_ID}")
-    print("✅ Supported: ALL platforms including streaming sites!")
     print(f"💾 Database: {DATABASE_PATH}")
     
     application = Application.builder().token(BOT_TOKEN).build()
@@ -1560,6 +1858,7 @@ def main():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("stats", stats_command))
     application.add_handler(CommandHandler("broadcast", broadcast_command))
+    application.add_handler(CommandHandler("zip", zip_command))
     
     # Message and callback handlers
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
@@ -1568,10 +1867,11 @@ def main():
     # Error handler
     application.add_error_handler(error_handler)
     
-    print("✅ SafeRobot is running!")
+    print("\n✅ SafeRobot is running!")
     print("📝 Owner commands:")
     print("   /stats - Lihat statistik pengguna")
     print("   /broadcast <pesan> - Kirim pesan ke semua user")
+    print("   /zip - ZIP semua file di folder downloads")
     print("\nPress Ctrl+C to stop")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
