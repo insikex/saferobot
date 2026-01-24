@@ -1,0 +1,17 @@
+# SafeRobot - Universal Media Downloader Bot
+# Python 3.10+
+
+# Telegram Bot
+python-telegram-bot>=20.0
+
+# Video Downloading
+yt-dlp>=2024.1.1
+
+# HTTP Requests
+aiohttp>=3.9.0
+
+# Browser Automation (untuk universal extraction seperti 9xbuddy)
+playwright>=1.40.0
+
+# Jangan lupa install browser setelah install playwright:
+# playwright install chromium
