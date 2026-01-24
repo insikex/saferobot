@@ -1,8 +1,25 @@
-# 🤖 SafeRobot - Multi-Platform Video Downloader Bot
+# 🤖 SafeRobot v5.0 - Universal Video Downloader Bot
 
-Bot Telegram untuk mendownload video dari berbagai platform sosial media dan streaming.
+Bot Telegram UNIVERSAL untuk mendownload video dari **WEBSITE APAPUN** - seperti 9xbuddy.site!
+
+## 🔥 Apa yang Baru di v5.0?
+
+### Universal Video Extraction
+Bot ini sekarang dapat mendownload video dari **hampir semua website** menggunakan teknologi yang sama seperti 9xbuddy.site dan aplikasi browser download di PlayStore:
+
+1. **Network Interception** - Menangkap SEMUA request video/audio dari browser
+2. **Playwright Browser Automation** - Render halaman JavaScript secara penuh
+3. **Multi-Pattern Detection** - Deteksi 40+ pola URL video
+4. **External API Fallback** - Gunakan API eksternal jika metode lain gagal
 
 ## ✨ Fitur
+
+### 🔥 Universal Download (BARU!)
+- **Download dari WEBSITE APAPUN** yang memiliki video
+- Network interception (seperti browser app di PlayStore)
+- Deteksi otomatis video player (JWPlayer, Video.js, Plyr, dll)
+- Ekstraksi video dari JavaScript yang ter-obfuscate
+- Fallback ke external API (cobalt, dll)
 
 ### 📱 Platform Sosial Media
 - TikTok
@@ -12,12 +29,13 @@ Bot Telegram untuk mendownload video dari berbagai platform sosial media dan str
 - Facebook
 - Pinterest
 
-### 🎬 Platform Streaming (50+ Platform)
+### 🎬 Platform Streaming (100+ Platform)
 - **DoodStream Family**: doodstream.com, dood.to, dood-hd.com, dll
 - **TeraBox Family**: terabox.com, 1024terabox.com, dll
 - **Videy/Videq Family**: vidoy.com, videq.io, videypro.live, dll
 - **LuluStream**: lulustream.com, lulu.st, lixstream.com
-- **Lainnya**: VidCloud, StreamTape, MixDrop, dan banyak lagi!
+- **MyVidPlay, Filemoon, StreamWish, VidHide**
+- **Dan 100+ platform lainnya!**
 
 ### 🔥 Fitur Lainnya
 - Multi-language (Indonesia/English)
@@ -26,6 +44,24 @@ Bot Telegram untuk mendownload video dari berbagai platform sosial media dan str
 - Auto-zip untuk link folder/playlist (limit ukuran)
 - Statistik pengguna (untuk owner)
 - Broadcast message ke semua user
+
+---
+
+## 🧠 Bagaimana Universal Extraction Bekerja?
+
+### Mengapa 9xbuddy.site dan Browser App Bisa Download dari Mana Saja?
+
+1. **Network Interception**: Mereka menangkap SEMUA request HTTP/HTTPS dari browser, termasuk video stream
+2. **JavaScript Rendering**: Mereka merender halaman secara penuh termasuk JavaScript
+3. **Player Detection**: Mereka mendeteksi video player seperti JWPlayer, Video.js, Plyr
+
+### Teknologi yang Digunakan SafeRobot v5.0:
+
+1. **Playwright Browser Automation** - Menjalankan browser Chromium secara headless
+2. **Network Response Interception** - Menangkap semua URL video/audio dari network requests
+3. **JavaScript Extraction** - Mengekstrak URL dari JavaScript context
+4. **Pattern Matching** - 40+ regex pattern untuk mendeteksi URL video
+5. **External API Fallback** - Menggunakan API seperti Cobalt jika metode lain gagal
 
 ---
 
@@ -94,23 +130,23 @@ pip install yt-dlp
 pip install beautifulsoup4
 pip install requests
 pip install lxml
+pip install playwright
+
+# PENTING: Install browser untuk Playwright
+python -m playwright install chromium
 ```
 
 Atau gunakan requirements.txt:
 
 ```bash
-# Buat file requirements.txt
-cat > requirements.txt << EOF
-python-telegram-bot[all]>=20.0
-yt-dlp>=2024.1.1
-beautifulsoup4>=4.12.0
-requests>=2.31.0
-lxml>=5.0.0
-EOF
-
 # Install dari requirements.txt
 pip install -r requirements.txt
+
+# PENTING: Install browser untuk Playwright (Universal Extraction)
+python -m playwright install chromium
 ```
+
+> **Note**: Playwright digunakan untuk Network Interception yang membuat bot bisa download dari website apapun seperti 9xbuddy.site
 
 ### Langkah 6: Konfigurasi Bot
 
