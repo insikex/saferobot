@@ -1,10 +1,12 @@
 import os
 import re
+import sys
 import asyncio
 import json
 import requests
 import subprocess
 from datetime import datetime, timedelta
+from http.cookiejar import MozillaCookieJar
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 import yt_dlp
@@ -20,6 +22,9 @@ OWNER_ID = 6683929810  # GANTI DENGAN USER ID TELEGRAM ANDA
 DOWNLOAD_PATH = "./downloads/"
 DATABASE_PATH = "./users_database.json"
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB limit Telegram
+COOKIE_FILE = os.getenv("COOKIE_FILE", "./cookies.txt")
+AUTO_INSTALL_PLAYWRIGHT = os.getenv("AUTO_INSTALL_PLAYWRIGHT", "1") == "1"
+PLAYWRIGHT_INSTALL_TIMEOUT = int(os.getenv("PLAYWRIGHT_INSTALL_TIMEOUT", "600"))
 
 if not os.path.exists(DOWNLOAD_PATH):
     os.makedirs(DOWNLOAD_PATH)
@@ -539,6 +544,8 @@ class SafeRobot:
         self.supported_platforms = {**self.social_platforms}
         for platform, domains in self.streaming_platforms.items():
             self.supported_platforms[platform] = domains
+        
+        self._playwright_install_attempted = False
     
     def detect_platform(self, url):
         """Deteksi platform dari URL"""
@@ -572,6 +579,159 @@ class SafeRobot:
             return 'streaming'
         return 'unknown'
     
+    def _build_headers(self, referer=None):
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': '*/*',
+            'Accept-Language': 'en-US,en;q=0.9',
+        }
+        if referer:
+            headers['Referer'] = referer
+            parsed = urlparse(referer)
+            if parsed.scheme and parsed.netloc:
+                headers['Origin'] = f"{parsed.scheme}://{parsed.netloc}"
+        return headers
+    
+    def _load_cookies(self, session):
+        if COOKIE_FILE and os.path.exists(COOKIE_FILE):
+            try:
+                jar = MozillaCookieJar(COOKIE_FILE)
+                jar.load(ignore_discard=True, ignore_expires=True)
+                session.cookies.update(jar)
+                return True
+            except Exception as e:
+                print(f"[Cookie] Failed to load cookies: {e}")
+        return False
+    
+    def _format_cookie_header(self, session):
+        try:
+            cookie_dict = requests.utils.dict_from_cookiejar(session.cookies)
+            if not cookie_dict:
+                return ""
+            return "; ".join([f"{k}={v}" for k, v in cookie_dict.items()])
+        except Exception:
+            return ""
+    
+    def resolve_url(self, url, max_hops=5):
+        """Resolve shortener/redirect URLs to final destination"""
+        try:
+            session = requests.Session()
+            self._load_cookies(session)
+            current_url = url
+            
+            for _ in range(max_hops):
+                if not current_url:
+                    break
+                
+                headers = self._build_headers(current_url)
+                
+                try:
+                    head_resp = session.head(
+                        current_url,
+                        headers=headers,
+                        allow_redirects=False,
+                        timeout=10
+                    )
+                    if head_resp.is_redirect and head_resp.headers.get('Location'):
+                        next_url = urljoin(current_url, head_resp.headers.get('Location'))
+                        if next_url == current_url:
+                            break
+                        current_url = next_url
+                        continue
+                except requests.RequestException:
+                    pass
+                
+                try:
+                    resp = session.get(
+                        current_url,
+                        headers=headers,
+                        allow_redirects=False,
+                        timeout=15
+                    )
+                except requests.RequestException:
+                    break
+                
+                if resp.is_redirect and resp.headers.get('Location'):
+                    next_url = urljoin(current_url, resp.headers.get('Location'))
+                    if next_url == current_url:
+                        break
+                    current_url = next_url
+                    continue
+                
+                content_type = resp.headers.get('content-type', '').lower()
+                if 'text/html' in content_type:
+                    html = resp.text
+                    meta_match = re.search(
+                        r'http-equiv=["\']refresh["\']\s*content=["\'][^"\']*url=([^"\']+)',
+                        html,
+                        re.IGNORECASE
+                    )
+                    if meta_match:
+                        next_url = urljoin(current_url, meta_match.group(1).strip())
+                        if next_url == current_url:
+                            break
+                        current_url = next_url
+                        continue
+                    
+                    js_match = re.search(
+                        r'window\.location(?:\.href)?\s*=\s*[\'"]([^\'"]+)',
+                        html
+                    )
+                    if js_match:
+                        next_url = urljoin(current_url, js_match.group(1).strip())
+                        if next_url == current_url:
+                            break
+                        current_url = next_url
+                        continue
+                
+                break
+            
+            return current_url
+        except Exception as e:
+            print(f"[Resolver] Error resolving URL: {e}")
+            return url
+    
+    def _is_stream_manifest(self, url, content_type=""):
+        target = (url or "").lower()
+        if any(ext in target for ext in ['.m3u8', '.mpd']):
+            return True
+        ct = (content_type or "").lower()
+        return any(marker in ct for marker in [
+            'mpegurl',
+            'application/vnd.apple.mpegurl',
+            'application/x-mpegurl',
+            'application/dash+xml'
+        ])
+    
+    def _ensure_playwright_browsers(self):
+        if not AUTO_INSTALL_PLAYWRIGHT:
+            return False
+        if self._playwright_install_attempted:
+            return False
+        self._playwright_install_attempted = True
+        
+        marker = os.path.join(DOWNLOAD_PATH, ".playwright_installed")
+        if os.path.exists(marker):
+            return True
+        
+        try:
+            result = subprocess.run(
+                [sys.executable, "-m", "playwright", "install", "chromium"],
+                capture_output=True,
+                timeout=PLAYWRIGHT_INSTALL_TIMEOUT
+            )
+            if result.returncode == 0:
+                with open(marker, "w", encoding="utf-8") as f:
+                    f.write("installed")
+                return True
+            stderr = result.stderr.decode(errors="ignore")
+            if stderr:
+                print(f"[Playwright] install failed: {stderr}")
+        except Exception as e:
+            print(f"[Playwright] install error: {e}")
+        
+        return False
+    
     async def extract_with_selenium(self, url):
         """Fallback: Ekstrak video URL menggunakan Selenium untuk situs dengan JavaScript berat"""
         video_urls = []
@@ -603,6 +763,10 @@ class SafeRobot:
             chrome_options.add_argument('--disable-blink-features=AutomationControlled')
             chrome_options.add_experimental_option('excludeSwitches', ['enable-automation'])
             chrome_options.add_experimental_option('useAutomationExtension', False)
+            
+            chrome_binary = os.getenv("CHROME_BINARY") or os.getenv("CHROMIUM_BINARY")
+            if chrome_binary and os.path.exists(chrome_binary):
+                chrome_options.binary_location = chrome_binary
             
             # Initialize driver
             if service:
@@ -707,8 +871,8 @@ class SafeRobot:
             
             # Look for video URLs in page source
             video_patterns = [
-                r'(?:src|source|file|video|stream)["\']?\s*[:=]\s*["\']([^"\']+\.(?:mp4|m3u8|webm)[^"\']*)["\']',
-                r'https?://[^\s"\'<>]+\.(?:mp4|m3u8|webm)(?:\?[^\s"\'<>]*)?',
+                r'(?:src|source|file|video|stream)["\']?\s*[:=]\s*["\']([^"\']+\.(?:mp4|m3u8|webm|mpd)[^"\']*)["\']',
+                r'https?://[^\s"\'<>]+\.(?:mp4|m3u8|webm|mpd)(?:\?[^\s"\'<>]*)?',
             ]
             
             for pattern in video_patterns:
@@ -743,10 +907,15 @@ class SafeRobot:
             print(f"[Playwright] Loading page: {url}")
             
             async with async_playwright() as p:
-                browser = await p.chromium.launch(
-                    headless=True,
-                    args=['--no-sandbox', '--disable-dev-shm-usage']
-                )
+                chromium_path = os.getenv("PLAYWRIGHT_CHROMIUM_PATH")
+                launch_args = {
+                    'headless': True,
+                    'args': ['--no-sandbox', '--disable-dev-shm-usage']
+                }
+                if chromium_path and os.path.exists(chromium_path):
+                    launch_args['executable_path'] = chromium_path
+                
+                browser = await p.chromium.launch(**launch_args)
                 
                 context = await browser.new_context(
                     user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -758,7 +927,7 @@ class SafeRobot:
                 
                 async def handle_response(response):
                     url = response.url
-                    if any(ext in url.lower() for ext in ['.mp4', '.m3u8', '.webm', 'stream', 'video']):
+                    if any(ext in url.lower() for ext in ['.mp4', '.m3u8', '.webm', '.mpd', 'stream', 'video']):
                         network_urls.append(url)
                 
                 page = await context.new_page()
@@ -790,6 +959,12 @@ class SafeRobot:
         except ImportError:
             print("[Playwright] Playwright not installed, skipping")
         except Exception as e:
+            error_text = str(e)
+            if ("Executable doesn't exist" in error_text or "playwright install" in error_text) and self._ensure_playwright_browsers():
+                try:
+                    return await self.extract_with_playwright(url)
+                except Exception as retry_error:
+                    print(f"[Playwright] Retry failed: {retry_error}")
             print(f"[Playwright] Error: {e}")
         finally:
             if browser:
@@ -845,11 +1020,12 @@ class SafeRobot:
             # Pattern untuk berbagai jenis obfuscation
             patterns = [
                 # Standard video URL patterns
-                r'(?:src|source|file|video_url|videoUrl|mp4|stream|url)["\']?\s*[:=]\s*["\']([^"\']+\.(?:mp4|m3u8|webm)[^"\']*)["\']',
-                r'(?:https?://[^\s"\'<>]+\.(?:mp4|m3u8|webm|mkv|avi)(?:\?[^\s"\'<>]*)?)',
+                r'(?:src|source|file|video_url|videoUrl|mp4|stream|url)["\']?\s*[:=]\s*["\']([^"\']+\.(?:mp4|m3u8|webm|mpd)[^"\']*)["\']',
+                r'(?:https?://[^\s"\'<>]+\.(?:mp4|m3u8|webm|mkv|avi|mpd)(?:\?[^\s"\'<>]*)?)',
                 
                 # HLS/M3U8 patterns
                 r'["\']([^"\']*\.m3u8[^"\']*)["\']',
+                r'["\']([^"\']*\.mpd[^"\']*)["\']',
                 r'source:\s*["\']([^"\']+)["\']',
                 
                 # Video hosting specific patterns
@@ -947,6 +1123,9 @@ class SafeRobot:
                 'Origin': urlparse(url).scheme + '://' + urlparse(url).netloc
             }
             
+            session = requests.Session()
+            self._load_cookies(session)
+            
             parsed = urlparse(url)
             base_url = f"{parsed.scheme}://{parsed.netloc}"
             
@@ -983,7 +1162,7 @@ class SafeRobot:
                 
                 for endpoint in api_endpoints:
                     try:
-                        resp = requests.get(endpoint, headers=headers, timeout=10)
+                        resp = session.get(endpoint, headers=headers, timeout=10)
                         if resp.status_code == 200:
                             # Try to parse as JSON
                             try:
@@ -1016,7 +1195,7 @@ class SafeRobot:
                 
                 for endpoint in post_endpoints:
                     try:
-                        resp = requests.post(
+                        resp = session.post(
                             endpoint,
                             headers=headers,
                             data={'id': video_id, 'video_id': video_id},
@@ -1045,22 +1224,23 @@ class SafeRobot:
     
     async def extract_direct_video_url(self, url):
         """Ekstrak URL video langsung dari halaman streaming"""
+        resolved_url = url
         try:
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            resolved_url = self.resolve_url(url)
+            if resolved_url != url:
+                print(f"[Resolver] Resolved URL: {resolved_url}")
+            url = resolved_url
+            
+            headers = self._build_headers(url)
+            headers.update({
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.5',
                 'Accept-Encoding': 'gzip, deflate',
                 'Connection': 'keep-alive',
-                'Referer': url,
-                'Sec-Fetch-Dest': 'document',
-                'Sec-Fetch-Mode': 'navigate',
-                'Sec-Fetch-Site': 'none',
-                'Sec-Fetch-User': '?1',
                 'Upgrade-Insecure-Requests': '1'
-            }
+            })
             
             session = requests.Session()
+            self._load_cookies(session)
             
             # Try to get the page with session to handle cookies
             response = session.get(url, headers=headers, timeout=30, allow_redirects=True)
@@ -1071,6 +1251,49 @@ class SafeRobot:
             
             # Cari video URL dari berbagai sumber
             video_urls = []
+            
+            # 0. Meta tags (og:video, twitter player, etc)
+            meta_keys = {
+                'og:video', 'og:video:url', 'og:video:secure_url',
+                'twitter:player:stream', 'twitter:player:stream:url',
+                'twitter:player', 'twitter:player:stream:content_url',
+                'contenturl', 'embedurl'
+            }
+            for meta in soup.find_all('meta'):
+                key = (meta.get('property') or meta.get('name') or '').lower()
+                content = meta.get('content')
+                if key in meta_keys and content:
+                    video_urls.append(content)
+            
+            # 0b. Preload links for video
+            for link in soup.find_all('link', href=True):
+                rel = ' '.join(link.get('rel', [])).lower()
+                as_attr = (link.get('as') or '').lower()
+                if 'preload' in rel and as_attr in ['video', 'fetch']:
+                    video_urls.append(link.get('href'))
+            
+            # 0c. JSON-LD data (contentUrl/embedUrl)
+            def collect_from_ld(data):
+                if isinstance(data, dict):
+                    for key in ['contentUrl', 'embedUrl', 'url', 'fileUrl']:
+                        value = data.get(key)
+                        if isinstance(value, str):
+                            video_urls.append(value)
+                    for value in data.values():
+                        collect_from_ld(value)
+                elif isinstance(data, list):
+                    for item in data:
+                        collect_from_ld(item)
+            
+            for script in soup.find_all('script', type='application/ld+json'):
+                try:
+                    script_text = script.string or script.get_text()
+                    if not script_text:
+                        continue
+                    data = json.loads(script_text)
+                    collect_from_ld(data)
+                except Exception:
+                    pass
             
             # 1. Cari tag video langsung
             video_tags = soup.find_all('video')
@@ -1096,6 +1319,8 @@ class SafeRobot:
                     elif iframe_src.startswith('/'):
                         parsed = urlparse(url)
                         iframe_src = f"{parsed.scheme}://{parsed.netloc}{iframe_src}"
+                    elif not iframe_src.startswith('http'):
+                        iframe_src = urljoin(url, iframe_src)
                     
                     # Follow iframe and extract from there
                     if 'embed' in iframe_src.lower() or 'player' in iframe_src.lower():
@@ -1139,19 +1364,21 @@ class SafeRobot:
                 if video_url and isinstance(video_url, str):
                     video_url = video_url.strip()
                     
+                    if video_url.startswith(('data:', 'blob:', 'javascript:')):
+                        continue
+                    
                     # Handle relative URLs
                     if video_url.startswith('//'):
                         video_url = 'https:' + video_url
-                    elif video_url.startswith('/'):
-                        parsed = urlparse(url)
-                        video_url = f"{parsed.scheme}://{parsed.netloc}{video_url}"
+                    if not video_url.startswith('http'):
+                        video_url = urljoin(url, video_url)
                     
                     # Validate URL
                     if video_url.startswith('http'):
                         # Check for video extensions or streaming indicators
-                        video_indicators = ['.mp4', '.m3u8', '.webm', '.mkv', '.avi', '.mov',
+                        video_indicators = ['.mp4', '.m3u8', '.webm', '.mkv', '.avi', '.mov', '.mpd',
                                            'download', 'stream', 'video', 'media', 'cdn',
-                                           '/dl/', '/get/', '/source/']
+                                           'manifest', '/dl/', '/get/', '/source/']
                         
                         if any(ind in video_url.lower() for ind in video_indicators):
                             # Avoid tracking/ad URLs
@@ -1196,23 +1423,28 @@ class SafeRobot:
                         print(f"Selenium extraction failed: {e}")
             
             print(f"Total: {len(unique_urls)} potential video URLs found")
-            return unique_urls
+            return unique_urls, resolved_url
             
         except Exception as e:
             print(f"Error extracting video URL: {e}")
             import traceback
             traceback.print_exc()
-            return []
+            return [], resolved_url
     
     async def download_with_custom_extractor(self, url, format_type='video'):
         """Download menggunakan custom extractor untuk platform yang tidak didukung yt-dlp"""
         try:
-            video_urls = await self.extract_direct_video_url(url)
+            video_urls, resolved_url = await self.extract_direct_video_url(url)
+            url = resolved_url
             
             if not video_urls:
                 return {'success': False, 'error': 'Tidak dapat menemukan URL video. Platform ini mungkin memerlukan login atau memiliki proteksi anti-bot.'}
             
             print(f"Trying to download from {len(video_urls)} potential URLs")
+            
+            session = requests.Session()
+            self._load_cookies(session)
+            cookie_header = self._format_cookie_header(session)
             
             # Sort URLs by priority (MP4 first, then M3U8, then others)
             def url_priority(u):
@@ -1232,7 +1464,7 @@ class SafeRobot:
             video_urls.sort(key=url_priority)
             
             # Generate filename
-            url_hash = hashlib.md5(url.encode()).hexdigest()[:8]
+            url_hash = hashlib.md5(resolved_url.encode()).hexdigest()[:8]
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             
             if format_type == 'audio':
@@ -1248,24 +1480,27 @@ class SafeRobot:
                 try:
                     print(f"Trying URL: {video_url[:100]}...")
                     
-                    headers = {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                        'Accept': '*/*',
+                    headers = self._build_headers(resolved_url)
+                    headers.update({
                         'Accept-Encoding': 'identity',
-                        'Accept-Language': 'en-US,en;q=0.9',
-                        'Referer': url,
-                        'Origin': urlparse(url).scheme + '://' + urlparse(url).netloc,
                         'Range': 'bytes=0-'
-                    }
+                    })
                     
-                    # Check if it's M3U8 (HLS stream)
-                    if '.m3u8' in video_url.lower():
-                        # Use ffmpeg to download HLS stream
+                    # Check if it's a streaming manifest (HLS/DASH)
+                    if self._is_stream_manifest(video_url):
+                        # Use ffmpeg to download stream
                         try:
                             print("Downloading HLS stream with ffmpeg...")
+                            header_lines = (
+                                f"Referer: {resolved_url}\r\n"
+                                "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36\r\n"
+                            )
+                            if cookie_header:
+                                header_lines += f"Cookie: {cookie_header}\r\n"
+                            
                             result = subprocess.run([
                                 'ffmpeg', '-y',
-                                '-headers', f'Referer: {url}\r\nUser-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36\r\n',
+                                '-headers', header_lines,
                                 '-i', video_url,
                                 '-c', 'copy',
                                 '-bsf:a', 'aac_adtstoasc',
@@ -1286,7 +1521,6 @@ class SafeRobot:
                             continue
                     
                     # Regular HTTP download
-                    session = requests.Session()
                     response = session.get(video_url, headers=headers, stream=True, timeout=120, allow_redirects=True)
                     
                     # Check content type
@@ -1299,6 +1533,38 @@ class SafeRobot:
                     if response.status_code != 200 and response.status_code != 206:
                         last_error = f"HTTP {response.status_code}"
                         continue
+                    
+                    if self._is_stream_manifest(video_url, content_type):
+                        response.close()
+                        try:
+                            print("Detected streaming manifest, downloading with ffmpeg...")
+                            header_lines = (
+                                f"Referer: {resolved_url}\r\n"
+                                "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36\r\n"
+                            )
+                            if cookie_header:
+                                header_lines += f"Cookie: {cookie_header}\r\n"
+                            
+                            result = subprocess.run([
+                                'ffmpeg', '-y',
+                                '-headers', header_lines,
+                                '-i', video_url,
+                                '-c', 'copy',
+                                '-bsf:a', 'aac_adtstoasc',
+                                temp_video
+                            ], capture_output=True, timeout=300)
+                            
+                            if os.path.exists(temp_video) and os.path.getsize(temp_video) > 10000:
+                                print("Stream download successful")
+                                break
+                            last_error = "Stream download produced empty file"
+                            if os.path.exists(temp_video):
+                                os.remove(temp_video)
+                            continue
+                        except Exception as e:
+                            last_error = str(e)
+                            print(f"FFmpeg stream download failed: {e}")
+                            continue
                     
                     if 'text/html' in content_type and content_length < 100000:
                         last_error = "Response is HTML, not video"
@@ -1399,6 +1665,12 @@ class SafeRobot:
     async def download_media(self, url, format_type='video'):
         """Download media dari berbagai platform"""
         platform = self.detect_platform(url)
+        if platform == 'generic':
+            resolved_url = self.resolve_url(url)
+            if resolved_url != url:
+                print(f"[Resolver] Expanded URL: {resolved_url}")
+                url = resolved_url
+                platform = self.detect_platform(url)
         is_streaming = self.is_streaming_platform(platform)
         
         print(f"[Download] Platform: {platform}, Is Streaming: {is_streaming}, Format: {format_type}")
@@ -1412,9 +1684,23 @@ class SafeRobot:
             if not result['success']:
                 print(f"[Download] Custom extractor failed, trying yt-dlp as fallback...")
                 try:
-                    yt_result = await self._download_with_ytdlp(url, format_type, platform)
+                    yt_result = await self._download_with_ytdlp(
+                        url,
+                        format_type,
+                        platform,
+                        force_generic=(platform == 'generic')
+                    )
                     if yt_result['success']:
                         return yt_result
+                    if "Unsupported URL" in (yt_result.get('error') or ""):
+                        yt_generic = await self._download_with_ytdlp(
+                            url,
+                            format_type,
+                            platform,
+                            force_generic=True
+                        )
+                        if yt_generic['success']:
+                            return yt_generic
                 except Exception as e:
                     print(f"[Download] yt-dlp fallback also failed: {e}")
             
@@ -1422,7 +1708,12 @@ class SafeRobot:
         
         # Untuk social media platforms, gunakan yt-dlp terlebih dahulu
         try:
-            result = await self._download_with_ytdlp(url, format_type, platform)
+            result = await self._download_with_ytdlp(
+                url,
+                format_type,
+                platform,
+                force_generic=(platform == 'generic')
+            )
             if result['success']:
                 return result
         except Exception as yt_error:
@@ -1432,7 +1723,7 @@ class SafeRobot:
         print(f"[Download] Falling back to custom extractor...")
         return await self.download_with_custom_extractor(url, format_type)
     
-    async def _download_with_ytdlp(self, url, format_type, platform):
+    async def _download_with_ytdlp(self, url, format_type, platform, force_generic=False):
         """Download menggunakan yt-dlp"""
         try:
             ydl_opts = {
@@ -1454,6 +1745,12 @@ class SafeRobot:
                     }
                 }
             }
+            
+            if COOKIE_FILE and os.path.exists(COOKIE_FILE):
+                ydl_opts['cookiefile'] = COOKIE_FILE
+            
+            if force_generic:
+                ydl_opts['force_generic_extractor'] = True
             
             # Tambahkan opsi khusus untuk streaming platforms
             if self.is_streaming_platform(platform):
@@ -1709,14 +2006,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
     )
     
-    if not url_pattern.match(text):
-        await update.message.reply_text(
-            get_text(update, 'send_link'),
-            reply_markup=get_main_keyboard(update)
-        )
-        return
-    
     url = text
+    if not url_pattern.match(url):
+        if re.match(r'^[\w.-]+\.[a-zA-Z]{2,}(/\S*)?$', url):
+            url = 'https://' + url
+        else:
+            await update.message.reply_text(
+                get_text(update, 'send_link'),
+                reply_markup=get_main_keyboard(update)
+            )
+            return
+    
+    try:
+        resolved_url = await asyncio.to_thread(bot.resolve_url, url)
+        if resolved_url:
+            url = resolved_url
+    except Exception as e:
+        print(f"[Resolver] Failed to resolve URL: {e}")
     platform = bot.detect_platform(url)
     
     if not platform:
@@ -1730,6 +2036,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url_id = str(hash(url))[-8:]
     context.user_data[url_id] = {
         'url': url,
+        'original_url': text,
         'platform': platform,
         'is_streaming': bot.is_streaming_platform(platform)
     }
