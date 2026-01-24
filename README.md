@@ -23,6 +23,7 @@ Bot Telegram untuk mendownload video dari berbagai platform sosial media dan str
 - Multi-language (Indonesia/English)
 - Button menu interface
 - Download video, audio, dan foto
+- Auto-zip untuk link folder/playlist (limit ukuran)
 - Statistik pengguna (untuk owner)
 - Broadcast message ke semua user
 
@@ -343,6 +344,21 @@ ydl_opts = {
 
 ```python
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB (limit Telegram)
+```
+
+### Auto-zip Folder/Playlist
+
+Jika link terdeteksi sebagai folder/playlist, bot akan menggabungkan hasil download menjadi file .zip. Anda dapat mengatur batasnya lewat environment variable:
+
+```bash
+# 1 = aktif, 0 = nonaktif
+export ALLOW_PLAYLIST_ZIP=1
+
+# Batas jumlah item yang diambil dari playlist/folder
+export MAX_ARCHIVE_ITEMS=10
+
+# Batas ukuran arsip (dalam byte)
+export MAX_ARCHIVE_SIZE=52428800
 ```
 
 ---
